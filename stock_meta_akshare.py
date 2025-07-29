@@ -28,7 +28,6 @@ def get_engine():
 
 def create_table(engine, table_name: str):
     with engine.begin() as conn:
-        # 如果表不存在，先创建一次（字段精度也在这里定义）
         conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS `{table_name}` (
                 `股票代码` VARCHAR(10) PRIMARY KEY,
@@ -81,7 +80,7 @@ def fetch_and_write_stock_data(engine, table_name):
                 '总市值': parse_unit_value(info_dict.get('总市值')),
                 '流通市值': parse_unit_value(info_dict.get('流通市值')),
                 '所属行业': info_dict.get('行业'),
-                '上市时间': pd.to_datetime(info_dict.get('上市时间'), errors='coerce'),
+                '上市时间': pd.to_datetime(info_dict.get('上市时间'),format='%Y%m%d', errors='coerce'),
             }
             with engine.begin() as conn:
                 exists = conn.execute(
