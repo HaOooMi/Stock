@@ -107,7 +107,7 @@ def fetch_stock_financial_data(engine, table_name):
                     ).fetchone()
 
                     if exists:
-                        print(f"  -> 已存在 {stock_name} ({stock_code}) 报告期 {report_date}，跳过。")
+                        continue
                     else:
                         df_to_write = pd.DataFrame([data_to_write])
                         df_to_write.to_sql(
@@ -116,8 +116,8 @@ def fetch_stock_financial_data(engine, table_name):
                             if_exists='append',
                             index=False,
                         )
-                        print(f"  -> 插入 {stock_name} ({stock_code}) 报告期 {report_date} 的数据。")               
-                time.sleep(0.4)
+            print(f"  -> 完成 {stock_name} ({stock_code}) 的 {len(financial_df)} 条财务报告处理。")             
+            time.sleep(0.4)
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 财务数据时发生错误: {e}")
             continue
