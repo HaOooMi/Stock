@@ -58,7 +58,7 @@ def fetch_stock_basic_data(engine, table_name):
                     )
                     print(f"  -> 成功写入 {stock_name} ({stock_code}) 的数据。")
 
-            time.sleep(0.3)
+            time.sleep(0.2)
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
             continue
@@ -74,7 +74,6 @@ def fetch_stock_financial_data(engine, table_name):
             financial_df = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按报告期")
             for _, report_row in financial_df.iterrows():
                 report_date = pd.to_datetime(report_row.get('报告期')).date()
-                
                 data_to_write = {
                     '股票代码': stock_code,
                     '报告期': report_date,
@@ -84,14 +83,16 @@ def fetch_stock_financial_data(engine, table_name):
                     '扣非净利润同比增长率': u.parse_percentage(report_row.get('扣非净利润同比增长率')),
                     '营业总收入': u.parse_unit_value(report_row.get('营业总收入')),
                     '营业总收入同比增长率': u.parse_percentage(report_row.get('营业总收入同比增长率')),
-                    '基本每股收益': u.clean_value(report_row.get('基本每股收益(元)')),
-                    '每股净资产': u.clean_value(report_row.get('每股净资产(元)')),
-                    '每股经营现金流': u.clean_value(report_row.get('每股经营现金流(元)')),
-                    '净资产收益率': u.parse_percentage(report_row.get('净资产收益率(%)')),
-                    '总资产报酬率': u.parse_percentage(report_row.get('总资产报酬率(%)')),
-                    '毛利率': u.parse_percentage(report_row.get('毛利率(%)')),
-                    '净利率': u.parse_percentage(report_row.get('净利率(%)')),
-                    '负债权益比': u.clean_value(report_row.get('负债权益比')),
+                    '基本每股收益': u.clean_value(report_row.get('基本每股收益')),
+                    '每股净资产': u.clean_value(report_row.get('每股净资产')),
+                    '每股资本公积金': u.clean_value(report_row.get('每股资本公积金')),
+                    '每股未分配利润': u.clean_value(report_row.get('每股未分配利润')),
+                    '每股经营现金流': u.clean_value(report_row.get('每股经营现金流')),
+                    '销售净利率': u.parse_percentage(report_row.get('销售净利率')),
+                    '净资产收益率': u.parse_percentage(report_row.get('净资产收益率')),
+                    '净资产收益率-摊薄': u.parse_percentage(report_row.get('净资产收益率-摊薄')),
+                    '营业周期': u.parse_unit_value(report_row.get('营业周期')),
+                    '应收账款周转天数': u.parse_unit_value(report_row.get('应收账款周转天数')),
                     '流动比率': u.clean_value(report_row.get('流动比率')),
                     '速动比率': u.clean_value(report_row.get('速动比率')),
                     '保守速动比率': u.clean_value(report_row.get('保守速动比率')),
@@ -100,22 +101,23 @@ def fetch_stock_financial_data(engine, table_name):
                 }
                 with engine.begin() as conn:
                     exists = conn.execute(
-                        text(f"SELECT 1 FROM `{table_name}` WHERE `股票代码` = :code AND `报告期` = :date"),
+                        text(f"SELECT 1 FROM `{table_name}` "
+                             "WHERE `股票代码` = :code AND `报告期` = :date"),
                         {'code': stock_code, 'date': report_date}
                     ).fetchone()
 
                     if exists:
-                    
-                        update_fields = ", ".join([f"`{col}` = :{col}" for col in data_to_write if col not in ['股票代码', '报告期']])
-                        update_sql = f"UPDATE `{table_name}` SET {update_fields} WHERE `股票代码` = :股票代码 AND `报告期` = :报告期"
-                        conn.execute(text(update_sql), data_to_write)
+                        print(f"  -> 已存在 {stock_name} ({stock_code}) 报告期 {report_date}，跳过。")
                     else:
-                        
                         df_to_write = pd.DataFrame([data_to_write])
-                        df_to_write.to_sql(table_name, conn, if_exists='append', index=False)
-                
-            print(f"  -> 完成 {stock_name} ({stock_code}) 的 {len(financial_df)} 条财务报告处理。")
-            time.sleep(0.1)
+                        df_to_write.to_sql(
+                            table_name,
+                            conn,
+                            if_exists='append',
+                            index=False,
+                        )
+                        print(f"  -> 插入 {stock_name} ({stock_code}) 报告期 {report_date} 的数据。")               
+                time.sleep(0.1)
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 财务数据时发生错误: {e}")
             continue

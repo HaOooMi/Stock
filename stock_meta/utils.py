@@ -46,24 +46,26 @@ def create_financial_table(engine, table_name: str):
                 `股票代码` VARCHAR(10) NOT NULL,
                 `报告期` DATE NOT NULL,
                 `净利润` DECIMAL(20,2),
-                `净利润同比增长率` DECIMAL(10,2),
+                `净利润同比增长率` VARCHAR(20),
                 `扣非净利润` DECIMAL(20,2),
-                `扣非净利润同比增长率` DECIMAL(10,2),
+                `扣非净利润同比增长率` VARCHAR(20),
                 `营业总收入` DECIMAL(20,2),
-                `营业总收入同比增长率` DECIMAL(10,2),
+                `营业总收入同比增长率` VARCHAR(20),
                 `基本每股收益` DECIMAL(10,4),
-                `每股净资产` DECIMAL(10,4),
-                `每股经营现金流` DECIMAL(10,4),
-                `净资产收益率` DECIMAL(10,2),
-                `总资产报酬率` DECIMAL(10,2),
-                `毛利率` DECIMAL(10,2),
-                `净利率` DECIMAL(10,2),
-                `负债权益比` DECIMAL(10,2),
+                `每股净资产` DECIMAL(10,2),
+                `每股资本公积金` DECIMAL(10,2),
+                `每股未分配利润` DECIMAL(10,2),
+                `每股经营现金流` DECIMAL(10,2),
+                `销售净利率` VARCHAR(20),
+                `净资产收益率` VARCHAR(20),
+                `净资产收益率-摊薄` VARCHAR(20),
+                `营业周期` DECIMAL(10,2),
+                `应收账款周转天数` DECIMAL(10,2),
                 `流动比率` DECIMAL(10,2),
                 `速动比率` DECIMAL(10,2),
                 `保守速动比率` DECIMAL(10,2),
                 `产权比率` DECIMAL(10,2),
-                `资产负债率` DECIMAL(10,2),
+                `资产负债率` VARCHAR(20),
                 PRIMARY KEY (`股票代码`, `报告期`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """))
@@ -71,7 +73,7 @@ def create_financial_table(engine, table_name: str):
 
 def parse_unit_value(value_str):
     """解析包含'亿'或'万'单位的字符串，转换为数字"""
-    if pd.isna(value_str) or value_str is None:
+    if pd.isna(value_str) or value_str in [None, '', 'None', 'nan', 'NaN', 'N/A', '--', 'False', 'false']:
         return None
 
     value_str = str(value_str)
@@ -89,10 +91,15 @@ def parse_unit_value(value_str):
         return None
 
 def parse_percentage(value_str):
-    """解析百分比字符串，如 '-9.37%'，转换为数字 -9.37"""
-    if pd.isna(value_str) or value_str is None or value_str == 'False':
+    """保留原始百分比字符串格式，仅进行空值检查"""
+    if value_str == 'False' or value_str == False:
         return None
-    try:
-        return float(str(value_str).replace('%', ''))
-    except (ValueError, TypeError):
+    if pd.isna(value_str) or value_str is None:
         return None
+    return str(value_str)
+
+def clean_value(value):
+    """将 'False' 字符串或 pandas 空值转为 None"""
+    if pd.isna(value) or str(value) == 'False':
+        return None
+    return value
