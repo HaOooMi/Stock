@@ -11,8 +11,6 @@ DB_CONFIG = {
 }
 
 
-TABLE_NAME = "a_stock_individual_info"
-
 def get_engine():
 
     url = (
