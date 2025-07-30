@@ -3,14 +3,15 @@ import pandas as pd
 import akshare as ak
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+import utils as u
 
 
-def fetch_and_write_stock_data(engine, table_name):
+def fetch_stock_basic_data(engine, table_name):
     stock_list_df = ak.stock_info_a_code_name()
     for index, row in stock_list_df.iterrows():
         stock_code = row["code"]
         stock_name = row["name"]
-        print(f"--- 正在处理: {stock_name} ({stock_code}) ---")
+        print(f"--- 正在处理股票基础信息: {stock_name} ({stock_code}) ---")
 
         try:
             individual_info_df = ak.stock_individual_info_em(symbol=stock_code)
@@ -18,10 +19,10 @@ def fetch_and_write_stock_data(engine, table_name):
             data_to_write = {
                 '股票代码': stock_code,
                 '股票简称': stock_name,
-                '总股本': parse_unit_value(info_dict.get('总股本')),
-                '流通股': parse_unit_value(info_dict.get('流通股')),
-                '总市值': parse_unit_value(info_dict.get('总市值')),
-                '流通市值': parse_unit_value(info_dict.get('流通市值')),
+                '总股本': u.parse_unit_value(info_dict.get('总股本')),
+                '流通股': u.parse_unit_value(info_dict.get('流通股')),
+                '总市值': u.parse_unit_value(info_dict.get('总市值')),
+                '流通市值': u.parse_unit_value(info_dict.get('流通市值')),
                 '所属行业': info_dict.get('行业'),
                 '上市时间': pd.to_datetime(info_dict.get('上市时间'),format='%Y%m%d', errors='coerce'),
             }
@@ -62,9 +63,61 @@ def fetch_and_write_stock_data(engine, table_name):
             print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
             continue
 
+def fetch_stock_financial_data(engine, table_name):
+    stock_list_df = ak.stock_info_a_code_name()
+    for index, row in stock_list_df.iterrows():
+        stock_code = row["code"]
+        stock_name = row["name"]
+        print(f"--- 正在处理股票财务指标: {stock_name} ({stock_code}) ---")
 
+        try:
+            financial_df = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按报告期")
+            for _, report_row in financial_df.iterrows():
+                report_date = pd.to_datetime(report_row.get('报告期')).date()
+                
+                data_to_write = {
+                    '股票代码': stock_code,
+                    '报告期': report_date,
+                    '净利润': u.parse_unit_value(report_row.get('净利润')),
+                    '净利润同比增长率': u.parse_percentage(report_row.get('净利润同比增长率')),
+                    '扣非净利润': u.parse_unit_value(report_row.get('扣非净利润')),
+                    '扣非净利润同比增长率': u.parse_percentage(report_row.get('扣非净利润同比增长率')),
+                    '营业总收入': u.parse_unit_value(report_row.get('营业总收入')),
+                    '营业总收入同比增长率': u.parse_percentage(report_row.get('营业总收入同比增长率')),
+                    '基本每股收益': u.clean_value(report_row.get('基本每股收益(元)')),
+                    '每股净资产': u.clean_value(report_row.get('每股净资产(元)')),
+                    '每股经营现金流': u.clean_value(report_row.get('每股经营现金流(元)')),
+                    '净资产收益率': u.parse_percentage(report_row.get('净资产收益率(%)')),
+                    '总资产报酬率': u.parse_percentage(report_row.get('总资产报酬率(%)')),
+                    '毛利率': u.parse_percentage(report_row.get('毛利率(%)')),
+                    '净利率': u.parse_percentage(report_row.get('净利率(%)')),
+                    '负债权益比': u.clean_value(report_row.get('负债权益比')),
+                    '流动比率': u.clean_value(report_row.get('流动比率')),
+                    '速动比率': u.clean_value(report_row.get('速动比率')),
+                    '保守速动比率': u.clean_value(report_row.get('保守速动比率')),
+                    '产权比率': u.clean_value(report_row.get('产权比率')),
+                    '资产负债率': u.parse_percentage(report_row.get('资产负债率')),
+                }
+                with engine.begin() as conn:
+                    exists = conn.execute(
+                        text(f"SELECT 1 FROM `{table_name}` WHERE `股票代码` = :code AND `报告期` = :date"),
+                        {'code': stock_code, 'date': report_date}
+                    ).fetchone()
 
-
-
+                    if exists:
+                    
+                        update_fields = ", ".join([f"`{col}` = :{col}" for col in data_to_write if col not in ['股票代码', '报告期']])
+                        update_sql = f"UPDATE `{table_name}` SET {update_fields} WHERE `股票代码` = :股票代码 AND `报告期` = :报告期"
+                        conn.execute(text(update_sql), data_to_write)
+                    else:
+                        
+                        df_to_write = pd.DataFrame([data_to_write])
+                        df_to_write.to_sql(table_name, conn, if_exists='append', index=False)
+                
+            print(f"  -> 完成 {stock_name} ({stock_code}) 的 {len(financial_df)} 条财务报告处理。")
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"  -> 处理 {stock_name} ({stock_code}) 财务数据时发生错误: {e}")
+            continue
 
 
