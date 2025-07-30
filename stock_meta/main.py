@@ -2,7 +2,7 @@ import stock_meta_akshare as source1
 import utils as u
 
 if __name__ == '__main__':
-    BASIC_TABLE_NAME = "a_stock_individual_info"
+    BASIC_TABLE_NAME = "stock_individual_info"
     FINANCIAL_TABLE_NAME = "stock_financial_data"
     engine = u.get_engine()
     u.create_basic_table(engine, BASIC_TABLE_NAME)

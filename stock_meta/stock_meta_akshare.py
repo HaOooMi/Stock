@@ -58,7 +58,7 @@ def fetch_stock_basic_data(engine, table_name):
                     )
                     print(f"  -> 成功写入 {stock_name} ({stock_code}) 的数据。")
 
-            time.sleep(0.2)
+            time.sleep(0.4)
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
             continue
@@ -117,7 +117,7 @@ def fetch_stock_financial_data(engine, table_name):
                             index=False,
                         )
                         print(f"  -> 插入 {stock_name} ({stock_code}) 报告期 {report_date} 的数据。")               
-                time.sleep(0.1)
+                time.sleep(0.4)
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 财务数据时发生错误: {e}")
             continue
