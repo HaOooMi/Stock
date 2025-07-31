@@ -13,7 +13,7 @@ INFLUX_BUCKET = "stock_kdata"
 
 
 
-def fetch_market_data(client, write_api,measurement_name):
+def fetch_market_data(client,measurement_name):
     try:
         stock_list_df = ak.stock_info_a_code_name()
         print(f"成功获取 {len(stock_list_df)} 只A股股票列表。")
@@ -52,6 +52,14 @@ def fetch_market_data(client, write_api,measurement_name):
                 
                 points.append(p)
 
+            write_api = client.write_api(
+                write_options=WriteOptions(
+                    batch_size=5000,  
+                    flush_interval=10_000, 
+                    jitter_interval=2_000, 
+                    retry_interval=5_000,  
+            )
+            )
             write_api.write(bucket="stock_kdata", org="stock", record=points)
             print(f"  -> 成功写入 {len(points)} 条 {stock_name} ({stock_code}) 的历史行情数据。")
             
