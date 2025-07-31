@@ -1,6 +1,8 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 import pandas as pd
+from influxdb_client import InfluxDBClient, Point, WriteOptions
+from influxdb_client.client.write_api import SYNCHRONOUS
 
 DB_CONFIG = {
     "user": "root",
@@ -10,6 +12,10 @@ DB_CONFIG = {
     "database": "stock_meta",
 }
 
+INFLUX_URL = "http://localhost:8086"
+INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  
+INFLUX_ORG = "stock"              
+INFLUX_BUCKET = "stock_kdata"
 
 def get_engine():
 
@@ -19,6 +25,23 @@ def get_engine():
         "?charset=utf8mb4"
     )
     return create_engine(url, echo=False, pool_pre_ping=True)
+
+
+
+def get_influxdb_client():
+    try:
+        client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        # 检查连接是否成功
+        if client.ping():
+            print("InfluxDB 连接成功！")
+            return client
+        else:
+            print("InfluxDB 连接失败，请检查 URL, Token 或服务状态。")
+            return None
+    except Exception as e:
+        print(f"创建 InfluxDB 客户端时发生错误: {e}")
+        return None
+    
 
 def create_basic_table(engine, table_name: str):
     """创建股票基础信息表"""

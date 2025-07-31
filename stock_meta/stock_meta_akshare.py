@@ -3,11 +3,35 @@ import pandas as pd
 import akshare as ak
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+
 import utils as u
+
+DB_CONFIG = {
+    "user": "root",
+    "password": "123456",
+    "host": "localhost",
+    "port": 3306,
+    "database": "stock_meta",
+}
+
+
+def get_engine():
+
+    url = (
+        f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@"
+        f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+        "?charset=utf8mb4"
+    )
+    return create_engine(url, echo=False, pool_pre_ping=True)
 
 
 def fetch_stock_basic_data(engine, table_name):
-    stock_list_df = ak.stock_info_a_code_name()
+    try:
+        stock_list_df = ak.stock_info_a_code_name()
+        print(f"成功获取 {len(stock_list_df)} 只A股股票列表。")
+    except Exception as e:
+        print(f"获取A股列表失败: {e}")
+        return
     for index, row in stock_list_df.iterrows():
         stock_code = row["code"]
         stock_name = row["name"]
