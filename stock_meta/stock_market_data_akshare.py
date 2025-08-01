@@ -5,7 +5,9 @@ from influxdb_client import InfluxDBClient, Point, WriteOptions
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 import utils as u
-
+# 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
+#                         ./influxd
+# 打开influxdb后，在浏览器访问 http://localhost:8086
 INFLUX_URL = "http://localhost:8086"
 INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  
 INFLUX_ORG = "stock"              

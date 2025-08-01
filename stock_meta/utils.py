@@ -31,7 +31,6 @@ def get_engine():
 def get_influxdb_client():
     try:
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-        # 检查连接是否成功
         if client.ping():
             print("InfluxDB 连接成功！")
             return client
