@@ -1,6 +1,7 @@
 import time
 import akshare as ak
 import pandas as pd
+import random
 from influxdb_client import InfluxDBClient, Point, WriteOptions
 from influxdb_client.client.write_api import SYNCHRONOUS
 
@@ -8,10 +9,6 @@ import utils as u
 # 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
 #                         ./influxd
 # 打开influxdb后，在浏览器访问 http://localhost:8086
-INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  
-INFLUX_ORG = "stock"              
-INFLUX_BUCKET = "stock_kdata"
 
 
 
@@ -62,7 +59,7 @@ def fetch_history_market_data(client,measurement_name):
                     retry_interval=5_000,  
             )
             )
-            write_api.write(bucket="stock_history_kdata", org="stock", record=points)
+            write_api.write(bucket="stock_kdata", org="stock", record=points)
             print(f"  -> 成功写入 {len(points)} 条 {stock_name} ({stock_code}) 的历史行情数据。")
             
             time.sleep(0.2)
@@ -77,12 +74,14 @@ def fetch_history_market_data(client,measurement_name):
 
 def fetch_now_market_data(client,measurement_name): 
     while True:
+        DELAY_BETWEEN_BATCHES_SECONDS = (0.5, 2.0)
+        delay = random.uniform(DELAY_BETWEEN_BATCHES_SECONDS[0], DELAY_BETWEEN_BATCHES_SECONDS[1])
         try:
             print(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} 正在获取所有沪深京 A 股上市公司实时行情 ---")
             realtime_df = ak.stock_zh_a_spot_em()
             if realtime_df.empty:
                 print("  -> 未获取到实时行情数据，稍后重试。")
-                time.sleep(1)
+                time.sleep(delay)
                 continue
             points = []
             current_time = pd.to_datetime('now', utc=True)
@@ -115,16 +114,16 @@ def fetch_now_market_data(client,measurement_name):
                     .time(current_time) 
                 points.append(p)
             if points:
-                client.write_api.write(bucket="stock_now_kdata", org="stock", record=points)
+                write_api = client.write_api()
+                write_api.write(bucket="stock_kdata", org="stock", record=points)
                 print(f"  -> 成功写入 {len(points)} 条实时行情数据。")
             else:
                 print("  -> 没有有效数据点可以写入。")
-
-            time.sleep(1)
+            time.sleep(delay)
 
         except KeyboardInterrupt:
             print("\n程序被用户中断。正在关闭...")
             break
         except Exception as e:
-            print(f"  -> 处理实时行情时发生错误: {e},将在1秒后重试。")
-            time.sleep(1)
+            print(f"  -> 处理实时行情时发生错误: {e},将在10秒后重试。")
+            time.sleep(delay)

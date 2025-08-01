@@ -6,24 +6,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import utils as u
 
-DB_CONFIG = {
-    "user": "root",
-    "password": "123456",
-    "host": "localhost",
-    "port": 3306,
-    "database": "stock_meta",
-}
-
-
-def get_engine():
-
-    url = (
-        f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@"
-        f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
-        "?charset=utf8mb4"
-    )
-    return create_engine(url, echo=False, pool_pre_ping=True)
-
 
 
 def fetch_stock_basic_data(engine, table_name):
