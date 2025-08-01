@@ -15,7 +15,7 @@ INFLUX_BUCKET = "stock_kdata"
 
 
 
-def fetch_market_data(client,measurement_name):
+def fetch_history_market_data(client,measurement_name):
     try:
         stock_list_df = ak.stock_info_a_code_name()
         print(f"成功获取 {len(stock_list_df)} 只A股股票列表。")
@@ -29,10 +29,10 @@ def fetch_market_data(client,measurement_name):
         print(f"--- 正在处理股票历史行情数据: {stock_name} ({stock_code}) ---")
 
         try:
-            kline_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+            kline_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="hfq")
             
             if kline_df.empty:
-                print(f"  -> 未找到 {stock_name} ({stock_code}) 的K线数据，跳过。")
+                print(f"  -> 未找到 {stock_name} ({stock_code}) 的历史行情数据,跳过。")
                 continue
 
             points = []
@@ -62,11 +62,69 @@ def fetch_market_data(client,measurement_name):
                     retry_interval=5_000,  
             )
             )
-            write_api.write(bucket="stock_kdata", org="stock", record=points)
+            write_api.write(bucket="stock_history_kdata", org="stock", record=points)
             print(f"  -> 成功写入 {len(points)} 条 {stock_name} ({stock_code}) 的历史行情数据。")
             
             time.sleep(0.2)
 
+        except KeyboardInterrupt:
+            print("\n程序被用户中断。正在关闭...")
+            break
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
             continue
+
+
+def fetch_now_market_data(client,measurement_name): 
+    while True:
+        try:
+            print(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} 正在获取所有沪深京 A 股上市公司实时行情 ---")
+            realtime_df = ak.stock_zh_a_spot_em()
+            if realtime_df.empty:
+                print("  -> 未获取到实时行情数据，稍后重试。")
+                time.sleep(1)
+                continue
+            points = []
+            current_time = pd.to_datetime('now', utc=True)
+            for _, row in realtime_df.iterrows():
+                if pd.isna(row['最新价']):
+                    continue
+                p = Point(measurement_name) \
+                    .tag("代码", row['代码']) \
+                    .tag("名称", row['名称']) \
+                    .field("最新价", float(row['最新价'])) \
+                    .field("涨跌幅(%)", float(row['涨跌幅'])) \
+                    .field("涨跌额", float(row['涨跌额'])) \
+                    .field("成交量(手)", float(row['成交量'])) \
+                    .field("成交额(元)", float(row['成交额'])) \
+                    .field("振幅(%)", float(row['振幅'])) \
+                    .field("最高", float(row['最高'])) \
+                    .field("最低", float(row['最低'])) \
+                    .field("今开", float(row['今开'])) \
+                    .field("昨收", float(row['昨收'])) \
+                    .field("量比", float(row['量比'])) \
+                    .field("换手率(%)", float(row['换手率'])) \
+                    .field("市盈率-动态", int(row['市盈率-动态'])) \
+                    .field("市净率", float(row['市净率'])) \
+                    .field("总市值(元)", float(row['总市值'])) \
+                    .field("流通市值(元)", float(row['流通市值'])) \
+                    .field("涨速", float(row['涨速'])) \
+                    .field("5分钟涨跌(%)", float(row['5分钟涨跌'])) \
+                    .field("60日涨跌幅(%)", float(row['60日涨跌幅'])) \
+                    .field("年初至今涨跌幅(%)", float(row['年初至今涨跌幅'])) \
+                    .time(current_time) 
+                points.append(p)
+            if points:
+                client.write_api.write(bucket="stock_now_kdata", org="stock", record=points)
+                print(f"  -> 成功写入 {len(points)} 条实时行情数据。")
+            else:
+                print("  -> 没有有效数据点可以写入。")
+
+            time.sleep(1)
+
+        except KeyboardInterrupt:
+            print("\n程序被用户中断。正在关闭...")
+            break
+        except Exception as e:
+            print(f"  -> 处理实时行情时发生错误: {e},将在1秒后重试。")
+            time.sleep(1)

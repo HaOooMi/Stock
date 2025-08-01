@@ -25,6 +25,7 @@ def get_engine():
     return create_engine(url, echo=False, pool_pre_ping=True)
 
 
+
 def fetch_stock_basic_data(engine, table_name):
     try:
         stock_list_df = ak.stock_info_a_code_name()
@@ -86,6 +87,8 @@ def fetch_stock_basic_data(engine, table_name):
         except Exception as e:
             print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
             continue
+
+
 
 def fetch_stock_financial_data(engine, table_name):
     stock_list_df = ak.stock_info_a_code_name()

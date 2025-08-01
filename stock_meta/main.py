@@ -12,6 +12,6 @@ if __name__ == '__main__':
     u.create_financial_table(engine, FINANCIAL_TABLE_NAME)
     stock_meta_akshare.fetch_stock_basic_data(engine, BASIC_TABLE_NAME)
     stock_meta_akshare.fetch_stock_financial_data(engine, FINANCIAL_TABLE_NAME)
-    stock_market_data_akshare.fetch_market_data(influx_client, MEASUREMENT_NAME)
+    stock_market_data_akshare.fetch_history_market_data(influx_client, MEASUREMENT_NAME)
 
     print("\n所有股票数据处理完毕！")
