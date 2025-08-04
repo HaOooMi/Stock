@@ -1,6 +1,15 @@
 from fastapi import FastAPI
 import uvicorn
 
-app=FastAPI()
+from get_basic_info_api import basic
+from get_historical_data_api import history
+from get_realtime_data_api import now
 
-app.include_router()
+stock=FastAPI()
+
+stock.include_router(basic)
+stock.include_router(history)
+stock.include_router(now)
+
+if __name__ == '__main__':
+    uvicorn.run("main:stock", host="127.0.0.1", port=8080, debug=True, reload=True)

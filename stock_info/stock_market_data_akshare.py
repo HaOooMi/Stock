@@ -90,8 +90,8 @@ def fetch_now_market_data(client,measurement_name):
                 if pd.isna(row['最新价']):
                     continue
                 p = Point(measurement_name) \
-                    .tag("代码", row['代码']) \
-                    .tag("名称", row['名称']) \
+                    .tag("股票代码", row['代码']) \
+                    .tag("股票名称", row['名称']) \
                     .field("最新价", float(row['最新价'])) \
                     .field("涨跌幅(%)", float(row['涨跌幅'])) \
                     .field("涨跌额", float(row['涨跌额'])) \
@@ -130,7 +130,7 @@ def fetch_now_market_data(client,measurement_name):
             time.sleep(delay)
 
 
-def get_history_data_(query_api: QueryApi, symbol: str, start: str, stop: str) -> pd.DataFrame:
+def get_history_data(query_api: QueryApi, symbol: str, start: str, stop: str) -> pd.DataFrame:
     flux_query = f'''
         from(bucket: "stock_kdata")
           |> range(start: {start}, stop: {stop})
@@ -152,7 +152,7 @@ def get_history_data_(query_api: QueryApi, symbol: str, start: str, stop: str) -
         return pd.DataFrame()
 
 
-def get__now_data(query_api: QueryApi, codes: List[str]) -> pd.DataFrame:
+def get_now_data(query_api: QueryApi, codes: List[str]) -> pd.DataFrame:
 
     codes_str = '["' + '", "'.join(codes) + '"]'
     

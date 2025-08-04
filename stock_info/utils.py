@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
 import pandas as pd
-from influxdb_client import InfluxDBClient, Point, WriteOptions
+from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 DB_CONFIG = {

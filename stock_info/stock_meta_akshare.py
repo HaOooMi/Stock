@@ -133,7 +133,7 @@ def fetch_stock_financial_data(engine, table_name):
             continue
 
 
-def get_basic_info_(db: Connection, codes: Tuple) -> Dict:
+def get_base_info(db: Connection, codes: Tuple) -> Dict:
     if not codes:
         return {}
     query = text("SELECT `股票代码`, `股票简称`, `总市值`, `流通市值`, `所属行业`, `上市时间` FROM `stock_basic` WHERE `股票代码` IN :codes")
