@@ -1,8 +1,9 @@
 import time
 import pandas as pd
 import akshare as ak
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
+from typing import Tuple, Dict
 
 import utils as u
 
@@ -132,3 +133,11 @@ def fetch_stock_financial_data(engine, table_name):
             continue
 
 
+def get_basic_info_(db: Connection, codes: Tuple) -> Dict:
+    if not codes:
+        return {}
+    query = text("SELECT `股票代码`, `股票简称`, `总市值`, `流通市值`, `所属行业`, `上市时间` FROM `stock_basic` WHERE `股票代码` IN :codes")
+    df = pd.read_sql(query, db, params={'codes': codes})
+    if '上市时间' in df.columns:
+        df['上市时间'] = df['上市时间'].astype(str)
+    return {row['股票代码']: row for _, row in df.iterrows()}

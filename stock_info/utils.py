@@ -17,7 +17,7 @@ INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7
 INFLUX_ORG = "stock"              
 INFLUX_BUCKET = "stock_kdata"
 
-def get_engine():
+def get_mysql_engine():
 
     url = (
         f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@"

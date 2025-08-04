@@ -2,8 +2,9 @@ import time
 import akshare as ak
 import pandas as pd
 import random
-from influxdb_client import InfluxDBClient, Point, WriteOptions
-from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client import Point, WriteOptions
+from influxdb_client.client.query_api import QueryApi
+from typing import Tuple, List, Dict
 
 import utils as u
 # 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
@@ -127,3 +128,51 @@ def fetch_now_market_data(client,measurement_name):
         except Exception as e:
             print(f"  -> 处理实时行情时发生错误: {e},将在10秒后重试。")
             time.sleep(delay)
+
+
+def get_history_data_(query_api: QueryApi, symbol: str, start: str, stop: str) -> pd.DataFrame:
+    flux_query = f'''
+        from(bucket: "stock_kdata")
+          |> range(start: {start}, stop: {stop})
+          |> filter(fn: (r) => r._measurement == "history_kdata")
+          |> filter(fn: (r) => r.股票代码 == "{symbol}")
+          |> pivot(
+              rowKey:["_time"],
+              columnKey: ["_field"],
+              valueColumn: "_value"
+          )
+          |> keep(columns: ["_time", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"])
+          |> rename(columns: {{_time: "日期"}})
+    '''
+    try:
+        df = query_api.query_data_frame(query=flux_query)
+        return df if not df.empty else pd.DataFrame()
+    except Exception as e:
+        print(f"InfluxDB historical query failed for {symbol}: {e}")
+        return pd.DataFrame()
+
+
+def get__now_data(query_api: QueryApi, codes: List[str]) -> pd.DataFrame:
+
+    codes_str = '["' + '", "'.join(codes) + '"]'
+    
+    flux_query = f'''
+        from(bucket: "stock_kdata")
+          |> range(start: -10s) 
+          |> filter(fn: (r) => r._measurement == "now_kdata")
+          |> filter(fn: (r) => contains(value: r.代码, set: {codes_str}))
+          |> last() 
+          |> pivot(
+              rowKey:["_time"],
+              columnKey: ["_field"],
+              valueColumn: "_value"
+          )
+          |> keep(columns: ["_time", "代码", "最新价", "涨跌幅(%)", "涨跌额", "成交量(手)", "成交额(元)", "振幅(%)", "最高", "最低", "今开", "昨收", "量比", "换手率(%)", "市盈率-动态", "市净率", "总市值(元)", "流通市值(元)", "涨速", "5分钟涨跌(%)", "60日涨跌幅(%)", "年初至今涨跌幅(%)"]) 
+          |> rename(columns: {{_time: "时间"}})
+    '''
+    try:
+        df = query_api.query_data_frame(query=flux_query)
+        return df if not df.empty else pd.DataFrame()
+    except Exception as e:
+        print(f"InfluxDB realtime query failed: {e}")
+        return pd.DataFrame()
