@@ -4,8 +4,9 @@ from typing import List
 from datetime import date, timedelta, datetime
 from influxdb_client.client.query_api import QueryApi
 
+import sys
+sys.path.append('d:/vscode projects/stock')
 from stock_info.stock_market_data_akshare import get_history_data
-
 from stock_info.utils import get_influxdb_client
 
 class DailyPriceData(BaseModel):

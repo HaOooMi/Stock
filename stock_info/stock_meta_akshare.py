@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from typing import Tuple, Dict
 
+
 import utils as u
 
 
@@ -133,11 +134,26 @@ def fetch_stock_financial_data(engine, table_name):
             continue
 
 
-def get_base_info(db: Connection, codes: Tuple) -> Dict:
-    if not codes:
+def get_basic_info_mysql(db: Connection, code: Tuple) -> Dict:
+    if not code:
         return {}
-    query = text("SELECT `股票代码`, `股票简称`, `总市值`, `流通市值`, `所属行业`, `上市时间` FROM `stock_basic` WHERE `股票代码` IN :codes")
-    df = pd.read_sql(query, db, params={'codes': codes})
-    if '上市时间' in df.columns:
-        df['上市时间'] = df['上市时间'].astype(str)
-    return {row['股票代码']: row for _, row in df.iterrows()}
+    query = text("SELECT `股票代码`, `股票简称`, `总股本`, `流通股`,`总市值`,`流通市值`,`所属行业`, `上市时间` FROM `stock_individual_info` WHERE `股票代码` IN :codes")
+    try:
+        df = pd.read_sql(query, db, params={'codes': code})
+        if '上市时间' in df.columns:
+            df['上市时间'] = df['上市时间'].astype(str)
+        return {row['股票代码']: row for _, row in df.iterrows()}
+    except Exception as e:
+        print(f"查询股票基本信息失败 (股票代码: {code}): {e}")
+        return pd.DataFrame()
+    
+def get_financial_info_mysql(db: Connection, code: str) -> pd.DataFrame:
+    if not code:
+        return {}
+    query = text("SELECT * FROM `stock_financial_data` WHERE `股票代码` = :code ORDER BY `报告期` DESC")
+    try:
+        df = pd.read_sql(query, db, params={'code': code})
+        return df if not df.empty else pd.DataFrame()
+    except Exception as e:
+        print(f"查询财务数据失败 (股票代码: {code}): {e}")
+        return pd.DataFrame()

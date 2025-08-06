@@ -4,7 +4,8 @@ from influxdb_client.client.query_api import QueryApi
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
-
+import sys
+sys.path.append('d:/vscode projects/stock')
 from stock_info.utils import get_influxdb_client
 from stock_info.stock_market_data_akshare import get_now_data
 

@@ -3,21 +3,17 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-DB_CONFIG = {
+
+
+
+def get_mysql_engine():
+    DB_CONFIG = {
     "user": "root",
     "password": "123456",
     "host": "localhost",
     "port": 3306,
     "database": "stock_meta",
-}
-
-INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  
-INFLUX_ORG = "stock"              
-INFLUX_BUCKET = "stock_kdata"
-
-def get_mysql_engine():
-
+    }
     url = (
         f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@"
         f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
@@ -28,6 +24,10 @@ def get_mysql_engine():
 
 
 def get_influxdb_client():
+    INFLUX_URL = "http://localhost:8086"
+    INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  
+    INFLUX_ORG = "stock"              
+    INFLUX_BUCKET = "stock_kdata"
     try:
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         if client.ping():
@@ -111,14 +111,17 @@ def parse_unit_value(value_str):
     except (ValueError, TypeError):
         return None
 
-def parse_percentage(value_str):
-    """保留原始百分比字符串格式，仅进行空值检查"""
-    if value_str == 'False' or value_str == False:
+def parse_percentage(value):
+    """将百分比转换为浮点数"""
+    if value is None or pd.isna(value) or value is False or value == 'False':
         return None
-    if pd.isna(value_str) or value_str is None:
+    try:
+        value = str(value).strip()
+        float_value = float(value.replace('%', ''))
+        return float_value / 100
+    except (ValueError, AttributeError):
         return None
-    return str(value_str)
-
+    
 def clean_value(value):
     """将 'False' 字符串或 pandas 空值转为 None"""
     if pd.isna(value) or str(value) == 'False':

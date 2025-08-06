@@ -6,7 +6,6 @@ from influxdb_client import Point, WriteOptions
 from influxdb_client.client.query_api import QueryApi
 from typing import Tuple, List, Dict
 
-import utils as u
 # 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
 #                         ./influxd
 # 打开influxdb后，在浏览器访问 http://localhost:8086
