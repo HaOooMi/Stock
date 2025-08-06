@@ -79,7 +79,7 @@ def create_financial_table(engine, table_name: str):
                 `每股经营现金流` DECIMAL(10,2),
                 `销售净利率` VARCHAR(20),
                 `净资产收益率` VARCHAR(20),
-                `净资产收益率-摊薄` VARCHAR(20),
+                `净资产收益率_摊薄` VARCHAR(20),
                 `营业周期` DECIMAL(10,2),
                 `应收账款周转天数` DECIMAL(10,2),
                 `流动比率` DECIMAL(10,2),
@@ -107,7 +107,10 @@ def parse_unit_value(value_str):
             num = float(value_str.replace('万', ''))
             return num * 10000
         else:
-            return pd.to_numeric(value_str, errors='coerce')
+            numeric_value = pd.to_numeric(value_str, errors='coerce')
+            if pd.isna(numeric_value):
+                return None
+            return numeric_value
     except (ValueError, TypeError):
         return None
 

@@ -6,7 +6,7 @@ from sqlalchemy.engine import Connection
 from typing import Tuple, Dict
 
 
-import utils as u
+from . import utils as u
 
 
 
@@ -101,7 +101,7 @@ def fetch_stock_financial_data(engine, table_name):
                     '每股经营现金流': u.clean_value(report_row.get('每股经营现金流')),
                     '销售净利率': u.parse_percentage(report_row.get('销售净利率')),
                     '净资产收益率': u.parse_percentage(report_row.get('净资产收益率')),
-                    '净资产收益率-摊薄': u.parse_percentage(report_row.get('净资产收益率-摊薄')),
+                    '净资产收益率_摊薄': u.parse_percentage(report_row.get('净资产收益率-摊薄')),
                     '营业周期': u.parse_unit_value(report_row.get('营业周期')),
                     '应收账款周转天数': u.parse_unit_value(report_row.get('应收账款周转天数')),
                     '流动比率': u.clean_value(report_row.get('流动比率')),
