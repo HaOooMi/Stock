@@ -4,9 +4,9 @@ from typing import Optional, List
 from datetime import date
 from sqlalchemy.engine import Connection
 
+from utils import get_mysql_engine
 import sys
 sys.path.append('d:/vscode projects/stock')
-from stock_info.utils import get_mysql_engine
 from stock_info.stock_meta_akshare import get_financial_info_mysql
 
 class FinancialReport(BaseModel):

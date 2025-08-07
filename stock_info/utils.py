@@ -27,7 +27,6 @@ def get_influxdb_client():
     INFLUX_URL = "http://localhost:8086"
     INFLUX_TOKEN = "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  
     INFLUX_ORG = "stock"              
-    INFLUX_BUCKET = "stock_kdata"
     try:
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         if client.ping():
@@ -92,26 +91,39 @@ def create_financial_table(engine, table_name: str):
         """))
     print(f"表 `{table_name}` 已创建")
 
+import pandas as pd
+
 def parse_unit_value(value_str):
-    """解析包含'亿'或'万'单位的字符串，转换为数字"""
+    """
+    解析包含数字单位的字符串，并转换为数字。
+    """
     if pd.isna(value_str) or value_str in [None, '', 'None', 'nan', 'NaN', 'N/A', '--', 'False', 'false']:
         return None
 
-    value_str = str(value_str)
+    value_str = str(value_str).strip().lower()
+
+    unit_multipliers = {
+        'k': 1_000,
+        'm': 1_000_000,
+        'g': 1_000_000_000,
+        'b': 1_000_000_000,
+        '万': 10_000,
+        '亿': 100_000_000,
+    }
 
     try:
-        if '亿' in value_str:
-            num = float(value_str.replace('亿', ''))
-            return num * 100000000
-        elif '万' in value_str:
-            num = float(value_str.replace('万', ''))
-            return num * 10000
-        else:
-            numeric_value = pd.to_numeric(value_str, errors='coerce')
-            if pd.isna(numeric_value):
-                return None
-            return numeric_value
+        for unit, multiplier in unit_multipliers.items():
+            if value_str.endswith(unit):
+                num_str = value_str.removesuffix(unit)
+                return float(num_str) * multiplier
+
+        numeric_value = pd.to_numeric(value_str, errors='coerce')
+        if pd.isna(numeric_value):
+            return None
+        return numeric_value
+
     except (ValueError, TypeError):
+
         return None
 
 def parse_percentage(value):

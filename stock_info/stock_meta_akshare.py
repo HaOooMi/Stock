@@ -6,7 +6,7 @@ from sqlalchemy.engine import Connection
 from typing import Tuple, Dict
 
 
-from . import utils as u
+import utils as u
 
 
 

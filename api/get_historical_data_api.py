@@ -4,10 +4,11 @@ from typing import List
 from datetime import date, timedelta, datetime
 from influxdb_client.client.query_api import QueryApi
 
+from utils import get_influxdb_client
 import sys
 sys.path.append('d:/vscode projects/stock')
 from stock_info.stock_market_data_akshare import get_history_data
-from stock_info.utils import get_influxdb_client
+
 
 class DailyPriceData(BaseModel):
     日期: datetime 
@@ -48,6 +49,6 @@ def get_historical_data(
         raise HTTPException(status_code=404, detail=f"未找到 {stock_code} 的历史数据。")
     
     return HistoricalDataResponse(
-        stock_code=stock_code,
+        股票代码=stock_code,
         data=history_df.to_dict('records')
     )
