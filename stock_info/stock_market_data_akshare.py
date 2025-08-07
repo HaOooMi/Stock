@@ -77,7 +77,7 @@ def fetch_history_market_data(client,measurement_name):
 
 def fetch_now_market_data(client,measurement_name): 
     while True:
-        DELAY_BETWEEN_BATCHES_SECONDS = (0.5, 2.0)
+        DELAY_BETWEEN_BATCHES_SECONDS = (5.0, 10.0)
         delay = random.uniform(DELAY_BETWEEN_BATCHES_SECONDS[0], DELAY_BETWEEN_BATCHES_SECONDS[1])
         try:
             print(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} 正在获取所有沪深京 A 股上市公司实时行情 ---")
@@ -95,25 +95,25 @@ def fetch_now_market_data(client,measurement_name):
                     .tag("股票代码", row['代码']) \
                     .tag("股票名称", row['名称']) \
                     .field("最新价", parse_unit_value(row['最新价'])) \
-                    .field("涨跌幅(%)", parse_unit_value(row['涨跌幅'])) \
+                    .field("涨跌幅(%)", float(row['涨跌幅'])) \
                     .field("涨跌额", parse_unit_value(row['涨跌额'])) \
                     .field("成交量(手)", parse_unit_value(row['成交量'])) \
                     .field("成交额(元)", parse_unit_value(row['成交额'])) \
-                    .field("振幅(%)", parse_unit_value(row['振幅'])) \
+                    .field("振幅(%)", float(row['振幅'])) \
                     .field("最高", parse_unit_value(row['最高'])) \
                     .field("最低", parse_unit_value(row['最低'])) \
                     .field("今开", parse_unit_value(row['今开'])) \
                     .field("昨收", parse_unit_value(row['昨收'])) \
                     .field("量比", parse_unit_value(row['量比'])) \
-                    .field("换手率(%)", parse_unit_value(row['换手率'])) \
+                    .field("换手率(%)", float(row['换手率'])) \
                     .field("市盈率-动态", parse_unit_value(row['市盈率-动态'])) \
                     .field("市净率", parse_unit_value(row['市净率'])) \
                     .field("总市值(元)", parse_unit_value(row['总市值'])) \
                     .field("流通市值(元)", parse_unit_value(row['流通市值'])) \
                     .field("涨速", parse_unit_value(row['涨速'])) \
-                    .field("5分钟涨跌(%)", parse_unit_value(row['5分钟涨跌幅'])) \
-                    .field("60日涨跌幅(%)", parse_unit_value(row['60日涨跌幅'])) \
-                    .field("年初至今涨跌幅(%)", parse_unit_value(row['年初至今涨跌幅'])) \
+                    .field("5分钟涨跌(%)", float(row['5分钟涨跌'])) \
+                    .field("60日涨跌幅(%)", float(row['60日涨跌幅'])) \
+                    .field("年初至今涨跌幅(%)", float(row['年初至今涨跌幅'])) \
                     .time(current_time)
                 points.append(p)
             if points:
