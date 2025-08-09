@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import date
 from sqlalchemy.engine import Connection
+import numpy as np
+import pandas as pd
 
 from utils import get_mysql_engine
 import sys
@@ -54,7 +56,22 @@ def get_financial_reports(
             status_code=404,
             detail=f"在数据库中未找到股票 {stock_code} 的财务报告数据。"
         )
+    float_columns = [
+        '净利润', '净利润同比增长率', '扣非净利润', '扣非净利润同比增长率',
+        '营业总收入', '营业总收入同比增长率', '基本每股收益', '每股净资产',
+        '每股资本公积金', '每股未分配利润', '每股经营现金流', '销售净利率',
+        '净资产收益率', '净资产收益率_摊薄', '营业周期', '应收账款周转天数',
+        '流动比率', '速动比率', '保守速动比率', '产权比率', '资产负债率'
+    ]
 
+    # 清洗：替换 inf 和 NaN 为 None
+    for col in float_columns:
+        if col in reports_df.columns:
+            reports_df[col] = reports_df[col].replace([np.inf, -np.inf], None)
+            reports_df[col] = np.where(reports_df[col].isna(), None, reports_df[col])
+
+    # 调试：打印清洗后数据
+    print(f"清洗后数据: {reports_df}")
     return FinancialReportsResponse(
         stock_code=stock_code,
         data=reports_df.to_dict('records')

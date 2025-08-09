@@ -134,7 +134,13 @@ def parse_percentage(value):
         return None
     
 def clean_value(value):
-    """将 'False' 字符串或 pandas 空值转为 None"""
-    if pd.isna(value) or str(value) == 'False':
+    """处理 inf, -inf, 和 nan，并将它们全部转换成 None"""
+    if value is None:
         return None
-    return value
+    try:
+        f_val = float(value)
+        if not math.isfinite(f_val):
+            return None
+        return f_val
+    except (ValueError, TypeError):
+        return None

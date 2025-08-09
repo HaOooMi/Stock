@@ -175,11 +175,40 @@ def get_now_data(query_api: QueryApi, codes: List[str]) -> pd.DataFrame:
     try:
         df = query_api.query_data_frame(query=flux_query)
         if not df.empty:
+            column_map = {
+                "_time": "时间",
+                "股票代码": "股票代码",
+                "股票名称": "股票名称",
+                "最新价": "最新价",
+                "涨跌幅(%)": "涨跌幅",
+                "涨跌额": "涨跌额",
+                "成交量(手)": "成交量",
+                "成交额(元)": "成交额",
+                "振幅(%)": "振幅",
+                "最高": "最高",
+                "最低": "最低",
+                "今开": "今开",
+                "昨收": "昨收",
+                "量比": "量比",
+                "换手率(%)": "换手率",
+                "市盈率-动态": "市盈率",
+                "市净率": "市净率",
+                "总市值(元)": "总市值",
+                "流通市值(元)": "流通市值",
+                "涨速": "涨速",
+                "5分钟涨跌(%)": "五分钟涨跌幅",
+                "60日涨跌幅(%)": "六十日涨跌幅",
+                "年初至今涨跌幅(%)": "年初至今涨跌幅"
+            }
+            df.rename(columns=column_map, inplace=True)
             if pd.api.types.is_datetime64_any_dtype(df['时间']):
-                df['时间'] = df['时间'].dt.tz_localize('UTC')
                 cst_timezone = timezone(timedelta(hours=8))
-                df['时间'] = df['时间'].dt.tz_convert(cst_timezone)
+                if df['时间'].dt.tz is None:
+                    df['时间'] = df['时间'].dt.tz_localize('UTC').dt.tz_convert(cst_timezone)
+                else:
+                    df['时间'] = df['时间'].dt.tz_convert(cst_timezone)
                 df['时间'] = df['时间'].dt.tz_localize(None)
+
             return df
         else:
             return pd.DataFrame()

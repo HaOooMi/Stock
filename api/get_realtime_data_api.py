@@ -25,7 +25,7 @@ class RealtimeQuote(BaseModel):
     昨收: Optional[float] = None
     量比: Optional[float] = None
     换手率: Optional[float] = None
-    市盈率: Optional[int] = None
+    市盈率: Optional[float] = None
     市净率: Optional[float] = None
     总市值: Optional[float] = None
     流通市值: Optional[float] = None

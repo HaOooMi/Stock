@@ -1,12 +1,17 @@
 from fastapi import FastAPI
 import uvicorn
+import json
+import numpy as np
 
 from get_basic_info_api import basic
 from get_financial_info_api import financial
 from get_historical_data_api import history
 from get_realtime_data_api import now
 
+
+    
 stock=FastAPI()
+
 
 stock.include_router(basic)
 stock.include_router(financial)

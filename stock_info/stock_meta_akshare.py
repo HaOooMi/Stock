@@ -149,11 +149,25 @@ def get_basic_info_mysql(db: Connection, code: Tuple) -> Dict:
     
 def get_financial_info_mysql(db: Connection, code: str) -> pd.DataFrame:
     if not code:
-        return {}
+        return pd.DataFrame()
     query = text("SELECT * FROM `stock_financial_data` WHERE `股票代码` = :code ORDER BY `报告期` DESC")
     try:
         df = pd.read_sql(query, db, params={'code': code})
-        return df if not df.empty else pd.DataFrame()
+        if df.empty:
+            return pd.DataFrame()
+        
+        float_columns = [
+            '净利润', '净利润同比增长率', '扣非净利润', '扣非净利润同比增长率',
+            '营业总收入', '营业总收入同比增长率', '基本每股收益', '每股净资产',
+            '每股资本公积金', '每股未分配利润', '每股经营现金流', '销售净利率',
+            '净资产收益率', '净资产收益率_摊薄', '营业周期', '应收账款周转天数',
+            '流动比率', '速动比率', '保守速动比率', '产权比率', '资产负债率'
+        ]
+        # 强制转换为float，无效值转为NaN
+        for col in float_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df
     except Exception as e:
         print(f"查询财务数据失败 (股票代码: {code}): {e}")
         return pd.DataFrame()
