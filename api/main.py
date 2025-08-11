@@ -14,9 +14,9 @@ stock=FastAPI()
 
 
 stock.include_router(basic)
-stock.include_router(financial)
-stock.include_router(history)
-stock.include_router(now)
+# stock.include_router(financial)
+# stock.include_router(history)
+# stock.include_router(now)
 
 if __name__ == '__main__':
     uvicorn.run("main:stock", host="127.0.0.1", port=8000,reload=True)
