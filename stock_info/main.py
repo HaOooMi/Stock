@@ -17,7 +17,7 @@ if __name__ == '__main__':
     # create_financial_table(engine, FINANCIAL_TABLE_NAME)
     # fetch_stock_basic_data(engine, BASIC_TABLE_NAME)
     # fetch_stock_financial_data(engine, FINANCIAL_TABLE_NAME)
-    # fetch_history_market_data(influx_client, HISTORY_KDATA_MEASUREMENT_NAME)
-    fetch_now_market_data(influx_client, NOW_KDATA_MEASUREMENT_NAME)
+    fetch_history_market_data(influx_client, HISTORY_KDATA_MEASUREMENT_NAME)
+    # fetch_now_market_data(influx_client, NOW_KDATA_MEASUREMENT_NAME)
 
     print("\n所有股票数据处理完毕！")
