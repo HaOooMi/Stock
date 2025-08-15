@@ -80,76 +80,93 @@ def calculate_returns(signals):
     return cumulative_returns
 
 def plot_results(df, signals, cumulative_returns):
-    """可视化K线、买卖点和收益曲线，添加均线显示"""
-    # 设置大尺寸图表
-    fig = plt.figure(figsize=(16, 12), dpi=120)
-    fig.suptitle('Simple Moving Average Strategy', fontsize=18)
-
-    # --- 上图：价格线、均线和买卖点 ---
-    ax1 = fig.add_subplot(2, 1, 1)
-    ax1.set_ylabel('Price', fontsize=14)
+    """可视化K线、买卖点和收益曲线（加大K线区域）"""
+    # 创建大尺寸图表
+    fig = plt.figure(figsize=(18, 16), dpi=120)
+    fig.suptitle('Simple Moving Average Strategy with Enhanced Candlestick', fontsize=20)
     
-    # 绘制价格线（收盘价）
-    ax1.plot(df.index, df['收盘'], 
-             label='Price Line', color='black', linewidth=1.5, alpha=0.7)
+    # 使用正确的GridSpec配置
+    gs = plt.GridSpec(2, 1, height_ratios=[3, 1])  # 2行1列，高度比例3:1
     
-    # 添加均线 - 按图片风格
+    # --- 上区域：大尺寸K线图（占75%高度） ---
+    ax1 = fig.add_subplot(gs[0])  # 第一行用于K线
+    ax1.set_ylabel('Price', fontsize=16)
+    
+    # 准备K线数据
+    ohlc = df[['开盘', '最高', '最低', '收盘']].copy()
+    ohlc.reset_index(inplace=True)
+    ohlc['date'] = ohlc['date'].map(mdates.date2num)
+    
+    # 计算K线宽度（动态调整）
+    num_days = len(ohlc)
+    width = max(0.8, min(1.2, 0.9 * (num_days/100)))  # 更宽的K线
+    
+    # 绘制大尺寸K线图（更清晰的蜡烛）
+    from mplfinance.original_flavor import candlestick_ohlc
+    candlestick_ohlc(ax1, ohlc.values, width=width, 
+                    colorup='green', colordown='red', alpha=0.9)
+    
+    # 绘制均线（加粗）
     ax1.plot(df.index, signals['short_ma'], 
-             label=f'MA{5}', color='blue', linestyle='-', linewidth=1.5)
+             label=f'MA{5}', color='blue', linestyle='-', linewidth=2.5)
     ax1.plot(df.index, signals['long_ma'], 
-             label=f'MA{20}', color='orange', linestyle='-', linewidth=1.5)
+             label=f'MA{20}', color='orange', linestyle='-', linewidth=2.5)
     
-    # 绘制买卖信号（与图片一致）
+    # 加大买卖信号标记
     buy_signals = signals[signals['buy'].notna()]
     ax1.plot(buy_signals.index, buy_signals['price'],
-            '^', markersize=5, color='green', 
-            label='Buy Signal', markeredgecolor='darkgreen')
+             '^', markersize=10, color='lime', markeredgecolor='darkgreen', 
+             label='Buy Signal', zorder=10)
     
     sell_signals = signals[signals['sell'].notna()]
     ax1.plot(sell_signals.index, sell_signals['price'],
-            'v', markersize=5, color='red', 
-            label='Sell Signal', markeredgecolor='darkred')
+             'v', markersize=10, color='red', markeredgecolor='darkred', 
+             label='Sell Signal', zorder=10)
     
-    # 图表优化
-    ax1.legend(fontsize=11, loc='upper left', ncol=2)
-    ax1.grid(True, linestyle='--', alpha=0.5)
+    # 增大图例和字体
+    ax1.legend(fontsize=14, loc='upper left')
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.xaxis_date()
+    ax1.tick_params(axis='both', which='major', labelsize=14)
     
-    # 设置坐标范围（参照图片）
+    # 设置Y轴范围（根据您的图片数据）
     ax1.set_ylim(1300, 2100)
-    ax1.set_yticks(range(1300, 2100, 100))
+    ax1.set_yticks(range(1300, 2101, 100))
     
-    # --- 下图：策略收益曲线 ---
-    ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
-    ax2.set_ylabel('Cumulative Returns', fontsize=14)
+    # 日期格式优化
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+    plt.setp(ax1.get_xticklabels(), rotation=45, ha='right', fontsize=12)
     
-    # 策略收益线（蓝色实线）
-    ax2.plot(cumulative_returns.index, cumulative_returns, 
-             label='Strategy Returns', color='blue', linewidth=1.5)
+    # --- 下区域：收益曲线（占25%高度） ---
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)  # 第二行用于收益
+    ax2.set_ylabel('Cumulative Returns', fontsize=16)
     
-    # 基准收益线（灰色虚线）
+    # 收益曲线（更粗的线条）
+    cumulative_returns.plot(ax=ax2, label='Strategy Returns', linewidth=2.5)
+    
+    # 基准线
     benchmark_returns = (1 + df['收盘'].pct_change()).cumprod()
-    ax2.plot(benchmark_returns.index, benchmark_returns, 
-             label='Benchmark (Buy & Hold)', color='gray', 
-             linestyle='--', linewidth=1.5)
+    benchmark_returns.plot(ax=ax2, label='Benchmark (Buy & Hold)', 
+                          color='gray', linestyle='--', linewidth=2.5)
     
-    # 图表优化
-    ax2.legend(fontsize=11)
-    ax2.grid(True, linestyle='--', alpha=0.5)
-    
-    # 设置收益坐标范围（约0.7-1.0）
+    # 收益区域设置
+    ax2.legend(fontsize=14)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.tick_params(axis='both', which='major', labelsize=14)
     ax2.set_ylim(0.7, 1.1)
     
-    # 设置X轴为日期格式
-    date_format = mdates.DateFormatter('%m-%d')  # 月-日格式
-    for ax in [ax1, ax2]:
-        ax.xaxis.set_major_formatter(date_format)
-        ax.xaxis.set_major_locator(mdates.MonthLocator())
-        plt.setp(ax.get_xticklabels(), fontsize=10)
-    
-    # 调整布局
+    # 添加最终收益率标注（放大字体）
+    final_return = cumulative_returns.iloc[-1] - 1
+    ax2.text(0.95, 0.05, f'Strategy Final Return: {final_return:.2%}', 
+             transform=ax2.transAxes, ha='right', va='bottom', 
+             fontsize=14, bbox=dict(facecolor='white', alpha=0.9))
+
+    # 最终调整
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.subplots_adjust(hspace=0.1)
+    plt.subplots_adjust(hspace=0.05)  # 减少子图间距
     
+    # 保存高清大图
+    plt.savefig('Large_Candlestick_Strategy.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 if __name__ == "__main__":
