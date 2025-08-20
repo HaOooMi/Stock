@@ -36,6 +36,14 @@ from stock_info import utils
 from stock_info.stock_market_data_akshare import get_history_data
 
 
+
+
+
+
+
+
+
+
 class SimpleMAStrategy(CtaTemplate):
     """简单双均线策略"""
     
@@ -44,6 +52,7 @@ class SimpleMAStrategy(CtaTemplate):
     # 策略参数
     fast_window = 5     # 快线周期
     slow_window = 20    # 慢线周期
+    trade_size = 100    # 每次交易手数
     
     # 策略变量
     fast_ma = 0.0       # 快线数值
@@ -55,13 +64,14 @@ class SimpleMAStrategy(CtaTemplate):
     def __init__(self, cta_engine, strategy_name, vt_symbol, setting):
         super().__init__(cta_engine, strategy_name, vt_symbol, setting)
         
-        self.bg = BarGenerator(self.on_bar, 1, self.on_day_bar)  # 使用日线
+        # 注意：回测时，BarGenerator通常不是必须的，因为引擎会直接推送日线
+        # self.bg = BarGenerator(self.on_bar) 
         self.am = ArrayManager()
         
     def on_init(self):
         """策略初始化"""
-        self.write_log("策略初始化")
-        self.load_bar(30)  # 加载30天历史数据
+        self.write_log("策略初始化 - 等待回放历史K线数据")
+        # self.load_bar(30)  # 在回测中，历史数据由引擎统一加载，此处无需调用
         
     def on_start(self):
         """策略启动"""
@@ -70,23 +80,23 @@ class SimpleMAStrategy(CtaTemplate):
     def on_stop(self):
         """策略停止"""
         self.write_log("策略停止")
-        
+
     def on_tick(self, tick: TickData):
         """收到行情TICK推送"""
-        self.bg.update_tick(tick)
+        # 日线回测不处理tick
+        pass
         
     def on_bar(self, bar: BarData):
-        """收到Bar推送"""
-        self.bg.update_bar(bar)
-        
-    def on_day_bar(self, bar: BarData):
-        """收到日线Bar推送"""
+        """
+        收到Bar推送。
+        在日线回测中，引擎会直接调用on_bar, 我们在这里处理日线逻辑。
+        """
         self.cancel_all()
         
         # 更新K线到技术指标缓存
         self.am.update_bar(bar)
         if not self.am.inited:
-            self.write_log(f"数据未初始化完成，当前数据量: {self.am.count}")
+            self.write_log(f"数据未初始化完成，当前K线数量: {self.am.count}/{self.slow_window}")
             return
             
         # 计算技术指标
@@ -97,35 +107,32 @@ class SimpleMAStrategy(CtaTemplate):
         self.slow_ma = slow_ma_array[-1]
         
         # 获取前一个值用于判断金叉死叉
-        if len(fast_ma_array) >= 2 and len(slow_ma_array) >= 2:
-            fast_ma_prev = fast_ma_array[-2]
-            slow_ma_prev = slow_ma_array[-2]
+        fast_ma_prev = fast_ma_array[-2]
+        slow_ma_prev = slow_ma_array[-2]
+
+        self.write_log(f"日期:{bar.datetime.date()} Close:{bar.close_price} FastMA:{self.fast_ma:.2f} SlowMA:{self.slow_ma:.2f} Pos:{self.pos}")
             
-            # 检查金叉条件
-            is_golden_cross = self.fast_ma > self.slow_ma and fast_ma_prev <= slow_ma_prev
-            # 检查死叉条件
-            is_death_cross = self.fast_ma < self.slow_ma and fast_ma_prev >= slow_ma_prev
-
-            # 打印判断条件，无论是否满足
-            if self.pos == 0:
-                self.write_log(f"判断金叉: (快线 > 慢线): {self.fast_ma > self.slow_ma}, (前快线 <= 前慢线): {fast_ma_prev <= slow_ma_prev}. 最终结果: {is_golden_cross}")
-            elif self.pos > 0:
-                self.write_log(f"判断死叉: (快线 < 慢线): {self.fast_ma < self.slow_ma}, (前快线 >= 前慢线): {fast_ma_prev >= slow_ma_prev}. 最终结果: {is_death_cross}")
-
-            # 判断交易信号
-            # 金叉：快线上穿慢线，买入开仓
-            if is_golden_cross and self.pos == 0:
-                self.buy(bar.close_price * 1.01, 1)
-                self.write_log(f"金叉买入信号: 快线{self.fast_ma:.2f} > 慢线{self.slow_ma:.2f}")
-                
-            # 死叉：快线下穿慢线，卖出平仓
-            elif is_death_cross and self.pos > 0:
-                self.sell(bar.close_price * 0.99, abs(self.pos))
-                self.write_log(f"死叉卖出信号: 快线{self.fast_ma:.2f} < 慢线{self.slow_ma:.2f}")
+        # 判断交易信号
+        # 金叉：快线上穿慢线，买入开仓
+        cross_up = self.fast_ma > self.slow_ma and fast_ma_prev <= slow_ma_prev
+        if cross_up and self.pos == 0:
+            self.buy(bar.close_price + self.pricetick, self.trade_size)
+            self.write_log(f"[BUY] 金叉买入信号: 快线{self.fast_ma:.2f} > 慢线{self.slow_ma:.2f}")
+            
+        # 死叉：快线下穿慢线，卖出平仓
+        cross_down = self.fast_ma < self.slow_ma and fast_ma_prev >= slow_ma_prev
+        if cross_down and self.pos > 0:
+            self.sell(bar.close_price - self.pricetick, abs(self.pos))
+            self.write_log(f"[SELL] 死叉卖出信号: 快线{self.fast_ma:.2f} < 慢线{self.slow_ma:.2f}")
             
         # 更新图形界面
         self.put_event()
         
+    def on_day_bar(self, bar: BarData):
+        """如果使用BarGenerator合成，会调用此方法。为保持兼容性，可将on_bar逻辑放此。"""
+        # 在本次修复中，我们直接在on_bar处理逻辑，因为引擎会直接推送日线到on_bar
+        pass
+
     def on_order(self, order: OrderData):
         """收到委托变化推送"""
         pass
@@ -140,8 +147,8 @@ class SimpleMAStrategy(CtaTemplate):
         pass
 
 
-def load_data_from_influxdb(engine: BacktestingEngine, stock_code: str, start_date: str, end_date: str):
-    """从InfluxDB加载数据到vnpy回测引擎"""
+def load_data_from_influxdb(stock_code: str, start_date: str, end_date: str) -> list[BarData]:
+    """从InfluxDB加载数据并返回BarData列表"""
     try:
         # 获取InfluxDB客户端
         client = utils.get_influxdb_client()
@@ -156,7 +163,7 @@ def load_data_from_influxdb(engine: BacktestingEngine, stock_code: str, start_da
         
         if df.empty:
             print(f"未找到股票 {stock_code} 的历史数据")
-            return False
+            return []
         
         # 确保日期列是datetime类型并排序
         if '日期' in df.columns:
@@ -184,20 +191,13 @@ def load_data_from_influxdb(engine: BacktestingEngine, stock_code: str, start_da
             )
             bars.append(bar)
         
-        # 将数据加载到回测引擎
-        engine.clear_data()  # 清除之前的数据
-        
-        # 正确的数据加载方式：直接赋值给history_data
-        engine.history_data = bars
-        print(f"成功将 {len(bars)} 条历史数据分配给vnpy回测引擎")
-        
-        return True
+        return bars
         
     except Exception as e:
         print(f"从InfluxDB加载数据失败: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        return []
 
 
 def run_backtesting_with_influxdb(stock_code='000001', start_date='2023-01-01', end_date='2023-12-31'):
@@ -216,7 +216,7 @@ def run_backtesting_with_influxdb(stock_code='000001', start_date='2023-01-01', 
         end=datetime.strptime(end_date, '%Y-%m-%d'),
         rate=0.0003,              # 手续费
         slippage=0.2,             # 滑点
-        size=100,                 # 合约乘数
+        size=1,                   # 股票size为1
         pricetick=0.01,           # 最小价格变动
         capital=100000,           # 起始资金
     )
@@ -224,41 +224,26 @@ def run_backtesting_with_influxdb(stock_code='000001', start_date='2023-01-01', 
     # 添加策略
     engine.add_strategy(SimpleMAStrategy, {
         "fast_window": 5,
-        "slow_window": 20
+        "slow_window": 20,
+        "trade_size": 100
     })
     
     # 从InfluxDB加载数据
     print(f"正在从InfluxDB加载 {stock_code} 的历史数据...")
-    if not load_data_from_influxdb(engine, stock_code, start_date, end_date):
+    bars = load_data_from_influxdb(stock_code, start_date, end_date)
+    if not bars:
         print("数据加载失败，回测终止")
         return None, None, None
     
+    # 【关键修复】将历史数据列表赋值给回测引擎
+    engine.history_data = bars
+    print(f"已准备 {len(engine.history_data)} 条Bar用于回测")
+
     # 运行回测
     print("开始运行回测...")
     engine.run_backtesting()
     
     # 计算回测结果
-    df = engine.calculate_result()
-    print("\n=== 回测结果 ===")
-    if not df.empty:
-        print(df)
-    else:
-        print("无交易记录")
-    
-    # 计算统计数据
-    statistics = engine.calculate_statistics()
-    print("\n=== 统计数据 ===")
-    for key, value in statistics.items():
-        print(f"{key}: {value}")
-    
-    # 显示图表
-    try:
-        engine.show_chart()
-    except Exception as e:
-        print(f"显示图表失败: {e}")
-    
-    return engine, df, statistics
-
 
 def run_optimization_with_influxdb(stock_code='000001', start_date='2022-01-01', end_date='2023-12-31'):
     """运行基于InfluxDB数据的参数优化"""
@@ -276,31 +261,25 @@ def run_optimization_with_influxdb(stock_code='000001', start_date='2022-01-01',
         end=datetime.strptime(end_date, '%Y-%m-%d'),
         rate=0.0003,
         slippage=0.2,
-        size=100,
+        size=1,
         pricetick=0.01,
         capital=100000,
     )
     
     # 从InfluxDB加载数据
     print(f"正在从InfluxDB加载 {stock_code} 的历史数据...")
-    if not load_data_from_influxdb(engine, stock_code, start_date, end_date):
+    bars = load_data_from_influxdb(stock_code, start_date, end_date)
+    if not bars:
         print("数据加载失败，优化终止")
         return None
+
+    # 【关键修复】将历史数据列表赋值给回测引擎
+    engine.history_data = bars
+    print(f"已准备 {len(engine.history_data)} 条Bar用于优化")
     
     # 设置优化参数
     setting = OptimizationSetting()
     setting.set_target("sharpe_ratio")
-    setting.add_parameter("fast_window", 3, 10, 1)
-    setting.add_parameter("slow_window", 15, 30, 5)
-    
-    # 运行优化
-    print("开始参数优化...")
-    results = engine.run_optimization(SimpleMAStrategy, setting)
-    
-    print("\n=== 优化结果 ===")
-    print(results)
-    
-    return results
 
 
 if __name__ == "__main__":
