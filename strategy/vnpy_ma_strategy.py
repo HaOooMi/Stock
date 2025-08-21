@@ -44,7 +44,8 @@ class SimpleMAStrategy(CtaTemplate):
     # 策略参数
     fast_window = 5     # 快线周期
     slow_window = 20    # 慢线周期
-    
+    trade_size = 1     # 交易数量
+
     # 策略变量
     fast_ma = 0.0       # 快线数值
     slow_ma = 0.0       # 慢线数值
@@ -115,7 +116,7 @@ class SimpleMAStrategy(CtaTemplate):
             # 判断交易信号
             # 金叉：快线上穿慢线，买入开仓
             if is_golden_cross and self.pos == 0:
-                self.buy(bar.close_price * 1.01, 1)
+                self.buy(bar.close_price * 1.01, self.trade_size)
                 self.write_log(f"金叉买入信号: 快线{self.fast_ma:.2f} > 慢线{self.slow_ma:.2f}")
                 
             # 死叉：快线下穿慢线，卖出平仓
