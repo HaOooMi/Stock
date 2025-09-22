@@ -9,6 +9,9 @@ import sys
 import os
 from typing import Dict, List, Optional, Tuple
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.feature_selection import VarianceThreshold, SelectKBest, mutual_info_regression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -29,6 +32,13 @@ try:
 except ImportError:
     TSFRESH_AVAILABLE = False
     print("⚠️ tsfresh 未安装，自动特征生成不可用")
+
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("⚠️ xgboost 未安装，将使用RandomForest进行特征重要性评估")
 
 # 添加stock_info路径以导入相关模块
 stock_info_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "stock_info")
@@ -168,7 +178,12 @@ class FeatureEngineer:
         if self.use_talib:
             data['rsi_14'] = talib.RSI(data['close'].values, timeperiod=14)
         else:
-            data['rsi_14'] = self._calculate_rsi(data['close'], window=14)
+            # 手工计算RSI（相对强弱指数）
+            delta = data['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            data['rsi_14'] = 100 - (100 / (1 + rs))
         
         # 布林带
         if self.use_talib:

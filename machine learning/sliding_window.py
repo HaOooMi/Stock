@@ -15,11 +15,103 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from typing import Tuple, List, Optional, Dict, Any
 import warnings
+import sys
+import os
 
 # 导入特征工程模块
 from features_engineering import FeatureEngineer
 
+# 添加stock_info路径以导入相关模块
+stock_info_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "stock_info")
+if stock_info_path not in sys.path:
+    sys.path.insert(0, stock_info_path)
+
+try:
+    import utils
+    from stock_market_data_akshare import get_history_data
+    INFLUXDB_AVAILABLE = True
+except ImportError:
+    INFLUXDB_AVAILABLE = False
+    print("⚠️ InfluxDB相关模块导入失败，将回退到CSV数据")
+
 warnings.filterwarnings('ignore')
+
+
+def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01", end_date: str = "2024-12-31") -> pd.DataFrame:
+    """
+    从InfluxDB加载真实股票数据
+    
+    Parameters:
+    -----------
+    symbol : str, default="000001"
+        股票代码
+    start_date : str, default="2022-01-01"
+        开始日期
+    end_date : str, default="2024-12-31"
+        结束日期
+        
+    Returns:
+    --------
+    pd.DataFrame
+        包含OHLCV数据的DataFrame，如果加载失败则返回None
+    """
+    if not INFLUXDB_AVAILABLE:
+        print("ERROR: InfluxDB modules not available, cannot load real data")
+        return None
+    
+    try:
+        print(f"Loading {symbol} data from InfluxDB...")
+        
+        # 获取InfluxDB客户端
+        client = utils.get_influxdb_client()
+        if client is None:
+            print("ERROR: Cannot connect to InfluxDB")
+            return None
+        
+        query_api = client.query_api()
+        
+        # 转换日期格式
+        start_str_rfc = f"{start_date}T00:00:00Z"
+        end_str_rfc = f"{end_date}T23:59:59Z"
+        
+        # 获取历史数据
+        df = get_history_data(query_api, symbol, start_str_rfc, end_str_rfc)
+        
+        if df.empty:
+            print(f"ERROR: No data found for {symbol} in InfluxDB")
+            client.close()
+            return None
+        
+        # 标准化列名
+        column_mapping = {
+            '日期': 'datetime',
+            '开盘': 'open',
+            '最高': 'high', 
+            '最低': 'low',
+            '收盘': 'close',
+            '成交量': 'volume',
+            '成交额': 'turnover'
+        }
+        
+        df = df.rename(columns=column_mapping)
+        
+        # 确保datetime列是正确的时间格式
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.sort_values('datetime').reset_index(drop=True)
+        
+        # 添加缺失的列
+        if 'turnover' not in df.columns:
+            df['turnover'] = 0.0
+        
+        print(f"SUCCESS: Loaded {len(df)} records for {symbol} from InfluxDB")
+        print(f"Date range: {df['datetime'].min().date()} to {df['datetime'].max().date()}")
+        
+        client.close()
+        return df[['datetime', 'open', 'high', 'low', 'close', 'volume', 'turnover']]
+        
+    except Exception as e:
+        print(f"ERROR: Failed to load data from InfluxDB: {str(e)}")
+        return None
 
 
 class SlidingWindowGenerator:
@@ -355,16 +447,19 @@ def demo_new_sliding_window():
     print("🚀 新版滑窗生成器演示")
     print("=" * 60)
     
-    # 数据路径
-    data_path = r"d:\vscode projects\stock\csv_data\000001.SZSE_d_2022-01-01_2024-12-31.csv"
+    # 优先尝试从InfluxDB加载真实数据
+    print("Loading data...")
+    df = load_real_stock_data("000001", "2022-01-01", "2024-12-31")
     
-    # 读取数据
-    df = pd.read_csv(data_path)
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    df = df.sort_values('datetime').reset_index(drop=True)
+    data_source = "Real stock data (InfluxDB)"
     
-    print(f"📊 数据加载完成: {len(df)} 条记录")
-    print(f"📅 时间范围: {df['datetime'].min()} 到 {df['datetime'].max()}")
+    # 如果真实数据太多，取最近的数据以提高演示速度
+    if len(df) > 500:
+        df = df.tail(500).reset_index(drop=True)
+        print(f"Using latest 500 records for demo performance")
+    
+    print(f"SUCCESS: Data loaded ({data_source}): {len(df)} records")
+    print(f"Date range: {df['datetime'].min().date()} to {df['datetime'].max().date()}")
     
     # 测试配置
     test_configs = [
@@ -484,23 +579,26 @@ def practical_examples():
 
 def test_boundary_fix():
     """
-    测试边界修复效果
+    测试边界修复效果 - 使用InfluxDB真实股票数据
     """
     print("🧪 测试create_target边界修复效果")
     print("=" * 50)
     
-    # 创建简单测试数据
-    test_data = pd.DataFrame({
-        'datetime': pd.date_range('2024-01-01', periods=10, freq='D'),
-        'close': [100, 102, 105, 103, 108, 110, 107, 112, 115, 118],
-        'high': [101, 103, 106, 104, 109, 111, 108, 113, 116, 119],
-        'low': [99, 101, 104, 102, 107, 109, 106, 111, 114, 117],
-        'open': [100, 102, 105, 103, 108, 110, 107, 112, 115, 118],
-        'volume': [1000] * 10
-    })
+    # 使用InfluxDB真实股票数据进行测试
+    print("📊 加载真实股票数据进行边界测试...")
+    test_data = load_real_stock_data("000001", "2024-01-01", "2024-01-31")
     
-    print(f"📊 测试数据: {len(test_data)} 天")
-    print("收盘价:", test_data['close'].tolist())
+    # 如果InfluxDB不可用，使用CSV数据作为备用
+    if test_data is None or len(test_data) < 10:
+        print("⚠️ InfluxDB数据不可用")
+    else:
+        # 如果数据太多，只取前15天进行快速测试
+        if len(test_data) > 15:
+            test_data = test_data.head(15).copy()
+        print(f"✅ 使用InfluxDB真实股票数据进行测试: {len(test_data)} 条记录")
+    
+    print(f"� 数据时间范围: {test_data['datetime'].min().date()} 到 {test_data['datetime'].max().date()}")
+    print("收盘价前5个:", test_data['close'].head().tolist())
     
     # 测试不同target_type的边界处理
     test_configs = [
