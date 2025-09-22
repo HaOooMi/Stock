@@ -1,6 +1,6 @@
 """
-股票滑窗数据生成器
-用于时序预测的样本生成和特征工程
+股票滑窗数据生成器 - 重构版
+用于时序预测的样本生成，使用独立的特征工程模块
 
 核心概念：
 1. 窗口长度(window_size)：用多少历史数据作为输入特征
@@ -15,101 +15,97 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from typing import Tuple, List, Optional, Dict, Any
 import warnings
+
+# 导入特征工程模块
+from feature_engineering import FeatureEngineer
+
 warnings.filterwarnings('ignore')
+
 
 class SlidingWindowGenerator:
     """
-    股票时序数据滑窗生成器
+    滑窗数据生成器 - 重构版
+    使用独立的特征工程模块处理特征生成
     """
     
     def __init__(self, 
-                 window_size: int = 60,
-                 prediction_steps: int = 1, 
+                 window_size: int = 30,
+                 prediction_steps: int = 1,
                  stride: int = 1,
                  target_type: str = 'return',
-                 scaler_type: str = 'standard'):
+                 scaler_type: str = 'standard',
+                 feature_type: str = 'manual',  # 'manual', 'auto', 'combined'
+                 max_auto_features: int = 50):
         """
         初始化滑窗生成器
         
         Parameters:
         -----------
-        window_size : int, default=60
-            历史数据窗口大小（多少天的数据作为输入）
+        window_size : int, default=30
+            滑动窗口大小（历史数据长度）
         prediction_steps : int, default=1
-            预测未来第几天（1=明天，5=未来5天后）
+            预测步长（预测未来第几步）
         stride : int, default=1
-            滑动步长（每次移动多少天）
+            滑动步长（窗口每次移动的步数）
         target_type : str, default='return'
-            预测目标类型：
-            - 'price': 预测未来价格
-            - 'return': 预测未来收益率
-            - 'return_multi': 预测未来N天累计收益率  
-            - 'direction': 预测涨跌方向（分类）
-            - 'high_low': 预测未来N天最高价和最低价
+            目标类型：'price', 'return', 'return_multi', 'direction', 'high_low'
         scaler_type : str, default='standard'
-            特征缩放方法：'standard', 'minmax', None
+            特征缩放类型：'standard', 'minmax', None
+        feature_type : str, default='manual'
+            特征类型：'manual'(手工), 'auto'(自动), 'combined'(组合)
+        max_auto_features : int, default=50
+            最大自动特征数量
         """
         self.window_size = window_size
         self.prediction_steps = prediction_steps
         self.stride = stride
         self.target_type = target_type
         self.scaler_type = scaler_type
+        self.feature_type = feature_type
+        self.max_auto_features = max_auto_features
         self.scaler = None
         
-        print(f"🔧 滑窗配置:")
-        print(f"   📏 窗口大小: {window_size} 天")
-        print(f"   🎯 预测目标: {target_type}")
-        print(f"   📍 预测步长: {prediction_steps} 天后")
-        print(f"   👣 滑动步长: {stride} 天")
-        print(f"   📊 缩放方式: {scaler_type}")
-    
+        # 初始化特征工程器
+        self.feature_engineer = FeatureEngineer()
+        
+        print(f"🔧 滑窗生成器配置:")
+        print(f"   📊 窗口大小: {self.window_size}")
+        print(f"   🎯 预测步长: {self.prediction_steps} 步后")
+        print(f"   ⚡ 滑动步长: {self.stride}")
+        print(f"   📈 目标类型: {self.target_type}")
+        print(f"   📏 缩放方式: {self.scaler_type}")
+        print(f"   🔧 特征类型: {self.feature_type}")
+        if self.feature_type in ['auto', 'combined']:
+            print(f"   🤖 最大自动特征: {self.max_auto_features}")
+
     def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        准备技术指标特征
+        使用特征工程模块生成特征
+        
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            原始OHLCV数据
+            
+        Returns:
+        --------
+        pd.DataFrame
+            包含特征的DataFrame
         """
-        data = df.copy()
-        
-        # 基础价格特征
-        data['price_change'] = data['close'].pct_change()
-        data['high_low_ratio'] = data['high'] / data['low']
-        data['close_open_ratio'] = data['close'] / data['open']
-        
-        # 移动平均线
-        for window in [5, 10, 20, 30]:
-            data[f'ma_{window}'] = data['close'].rolling(window).mean()
-            data[f'price_ma_{window}_ratio'] = data['close'] / data[f'ma_{window}']
-        
-        # 波动性指标
-        data['volatility_5'] = data['price_change'].rolling(5).std()
-        data['volatility_20'] = data['price_change'].rolling(20).std()
-        
-        # 成交量特征
-        data['volume_ma_5'] = data['volume'].rolling(5).mean()
-        data['volume_ratio'] = data['volume'] / data['volume_ma_5']
-        
-        # RSI 相对强弱指数
-        def calculate_rsi(prices, window=14):
-            delta = prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            return rsi
-        
-        data['rsi'] = calculate_rsi(data['close'])
-        
-        # 布林带
-        ma_20 = data['close'].rolling(20).mean()
-        std_20 = data['close'].rolling(20).std()
-        data['bollinger_upper'] = ma_20 + (std_20 * 2)
-        data['bollinger_lower'] = ma_20 - (std_20 * 2)
-        data['bollinger_position'] = (data['close'] - data['bollinger_lower']) / (data['bollinger_upper'] - data['bollinger_lower'])
-        
-        # 删除原始OHLCV，只保留技术指标
-        feature_columns = [col for col in data.columns if col not in ['datetime', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'open_interest']]
-        
-        return data[['datetime', 'close'] + feature_columns].dropna()
-    
+        if self.feature_type == 'manual':
+            return self.feature_engineer.prepare_manual_features(df)
+        elif self.feature_type == 'auto':
+            return self.feature_engineer.prepare_auto_features(
+                df, window_size=self.window_size, max_features=self.max_auto_features
+            )
+        elif self.feature_type == 'combined':
+            return self.feature_engineer.prepare_combined_features(
+                df, window_size=self.window_size, 
+                auto_features=True, max_auto_features=self.max_auto_features
+            )
+        else:
+            raise ValueError(f"不支持的特征类型: {self.feature_type}")
+
     def create_target(self, df: pd.DataFrame) -> np.ndarray:
         """
         根据target_type创建预测目标
@@ -184,7 +180,7 @@ class SlidingWindowGenerator:
             raise ValueError(f"不支持的target_type: {self.target_type}")
         
         return target
-    
+
     def generate_samples(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
         """
         生成滑窗样本
@@ -200,14 +196,14 @@ class SlidingWindowGenerator:
         """
         print(f"🔄 开始生成滑窗样本...")
         
-        # 准备特征
+        # 使用特征工程模块生成特征
         data = self.prepare_features(df)
         print(f"📊 特征工程完成，特征数量: {len(data.columns) - 2}")  # 减去datetime和close
         
-        # 创建目标
+        # 创建目标值
         target = self.create_target(data)
         
-        # 准备特征数组（除了datetime和close）
+        # 准备特征数组
         feature_columns = [col for col in data.columns if col not in ['datetime', 'close']]
         features = data[feature_columns].values
         
@@ -219,22 +215,26 @@ class SlidingWindowGenerator:
             self.scaler = MinMaxScaler()
             features = self.scaler.fit_transform(features)
         
-        # 生成滑窗样本
+        # 初始化样本存储
         X, y, metadata = [], [], []
         
+        # 计算最大起始索引
         max_start_idx = len(features) - self.window_size - self.prediction_steps
         
+        # 滑窗生成样本
         for i in range(0, max_start_idx, self.stride):
-            # 输入特征窗口
+            # 提取窗口特征
             x_window = features[i:i+self.window_size]
             
-            # 目标值
-            target_idx = i + self.window_size - 1  # 窗口最后一天的目标
+            # 目标索引
+            target_idx = i + self.window_size - 1  # 窗口最后一天的索引
+            
+            # 检查目标值有效性
             if target_idx < len(target) and not np.any(np.isnan(target[target_idx])):
                 X.append(x_window)
                 y.append(target[target_idx])
                 
-                # 记录元数据
+                # 保存元数据
                 window_start = data.iloc[i]['datetime']
                 window_end = data.iloc[i+self.window_size-1]['datetime']
                 prediction_date = data.iloc[min(target_idx + self.prediction_steps, len(data)-1)]['datetime']
@@ -246,6 +246,7 @@ class SlidingWindowGenerator:
                     'current_price': data.iloc[target_idx]['close']
                 })
         
+        # 转换为numpy数组
         X = np.array(X)
         y = np.array(y)
         metadata = pd.DataFrame(metadata)
@@ -256,38 +257,41 @@ class SlidingWindowGenerator:
         print(f"   🎯 输出形状: {y.shape}")
         
         return X, y, metadata
-    
+
     def analyze_samples(self, X: np.ndarray, y: np.ndarray, metadata: pd.DataFrame):
         """
         分析生成的样本
         """
-        print(f"\n📊 样本分析报告:")
-        print(f"=" * 50)
+        print(f"\n📊 样本分析报告")
+        print("=" * 50)
         
-        # 基本统计
+        # 基本信息
         print(f"数据概览:")
         print(f"  - 总样本数: {len(X)}")
         print(f"  - 输入维度: {X.shape}")
         print(f"  - 输出维度: {y.shape}")
         print(f"  - 时间跨度: {metadata['window_start'].min()} 到 {metadata['prediction_date'].max()}")
         
-        # 目标分析
+        # 目标值分析
+        print(f"\n目标值分析:")
         if self.target_type == 'direction':
-            print(f"\n分类目标分析:")
+            # 分类任务分析
             unique, counts = np.unique(y, return_counts=True)
             for val, count in zip(unique, counts):
                 label = "上涨" if val == 1 else "下跌"
                 print(f"  - {label}: {count} 个样本 ({count/len(y)*100:.1f}%)")
         else:
-            print(f"\n回归目标分析:")
-            print(f"  - 均值: {np.mean(y):.4f}")
-            print(f"  - 标准差: {np.std(y):.4f}")
-            print(f"  - 最小值: {np.min(y):.4f}")
-            print(f"  - 最大值: {np.max(y):.4f}")
-            
+            # 回归任务分析
             if len(y.shape) > 1 and y.shape[1] > 1:
+                # 多维目标
                 for i in range(y.shape[1]):
                     print(f"  - 维度{i} - 均值: {np.mean(y[:, i]):.4f}, 标准差: {np.std(y[:, i]):.4f}")
+            else:
+                # 单维目标
+                print(f"  - 均值: {np.mean(y):.4f}")
+                print(f"  - 标准差: {np.std(y):.4f}")
+                print(f"  - 最小值: {np.min(y):.4f}")
+                print(f"  - 最大值: {np.max(y):.4f}")
         
         # 缺失值检查
         if np.any(np.isnan(X)) or np.any(np.isnan(y)):
@@ -296,127 +300,116 @@ class SlidingWindowGenerator:
             print(f"  - y中缺失值: {np.sum(np.isnan(y))}")
         else:
             print(f"\n✅ 无缺失值")
-    
+
     def visualize_samples(self, X: np.ndarray, y: np.ndarray, metadata: pd.DataFrame, n_samples: int = 3):
         """
-        可视化几个样本
+        可视化样本分析
         """
-        plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置中文字体
+        plt.rcParams['font.sans-serif'] = ['SimHei']
         plt.rcParams['axes.unicode_minus'] = False
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        fig.suptitle(f'滑窗样本可视化 (窗口={self.window_size}, 预测={self.target_type})', fontsize=16)
         
-        # 1. 样本时间分布
-        axes[0, 0].hist(pd.to_datetime(metadata['window_end']), bins=50, alpha=0.7, color='blue')
-        axes[0, 0].set_title('样本时间分布')
-        axes[0, 0].set_xlabel('时间')
-        axes[0, 0].set_ylabel('样本数量')
-        plt.setp(axes[0, 0].xaxis.get_majorticklabels(), rotation=45)
+        # 子图1: 样本时间分布
+        axes[0,0].hist(metadata['window_end'], bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+        axes[0,0].set_title('样本时间分布')
+        axes[0,0].tick_params(axis='x', rotation=45)
         
-        # 2. 目标值分布
+        # 子图2: 目标值分布
         if self.target_type == 'direction':
             unique, counts = np.unique(y, return_counts=True)
             labels = ['下跌' if x == 0 else '上涨' for x in unique]
-            axes[0, 1].bar(labels, counts, alpha=0.7, color=['red', 'green'])
-            axes[0, 1].set_title('涨跌分布')
+            axes[0,1].bar(labels, counts, color=['red', 'green'], alpha=0.7)
+            axes[0,1].set_title('涨跌分布')
         else:
-            axes[0, 1].hist(y.flatten() if len(y.shape) > 1 else y, bins=50, alpha=0.7, color='green')
-            axes[0, 1].set_title('目标值分布')
-            axes[0, 1].set_xlabel('目标值')
-            axes[0, 1].set_ylabel('频次')
+            axes[0,1].hist(y.flatten() if len(y.shape) > 1 else y, bins=30, alpha=0.7, color='lightgreen', edgecolor='black')
+            axes[0,1].set_title('目标值分布')
         
-        # 3. 特征重要性（显示第一个特征的变化）
-        if X.shape[2] > 0:
-            feature_mean = np.mean(X[:, :, 0], axis=0)  # 第一个特征在所有样本上的均值
-            axes[1, 0].plot(feature_mean)
-            axes[1, 0].set_title('特征趋势 (特征0的窗口内平均)')
-            axes[1, 0].set_xlabel('窗口内位置')
-            axes[1, 0].set_ylabel('特征值')
+        # 子图3: 特征趋势（展示第0个特征的平均曲线）
+        if len(X) > 0:
+            mean_feature_0 = np.mean(X[:, :, 0], axis=0)
+            axes[1,0].plot(range(self.window_size), mean_feature_0, marker='o', linewidth=2)
+            axes[1,0].set_title('特征0的平均趋势')
+            axes[1,0].set_xlabel('时间步')
+            axes[1,0].grid(True, alpha=0.3)
         
-        # 4. 样本展示
-        axes[1, 1].set_title(f'随机展示 {min(n_samples, len(X))} 个样本')
-        colors = ['blue', 'red', 'green', 'orange', 'purple']
-        
-        sample_indices = np.random.choice(len(X), min(n_samples, len(X)), replace=False)
-        
-        for i, idx in enumerate(sample_indices):
-            if X.shape[2] > 0:
-                # 显示第一个特征
-                axes[1, 1].plot(X[idx, :, 0], 
-                               color=colors[i % len(colors)], 
-                               alpha=0.7,
-                               label=f'样本{idx} (目标: {y[idx]:.3f})')
-        
-        axes[1, 1].legend()
-        axes[1, 1].set_xlabel('时间步')
-        axes[1, 1].set_ylabel('特征值')
+        # 子图4: 随机样本展示
+        if len(X) >= n_samples:
+            sample_indices = np.random.choice(len(X), n_samples, replace=False)
+            for idx in sample_indices:
+                axes[1,1].plot(range(self.window_size), X[idx, :, 0], alpha=0.7, 
+                             label=f'样本{idx} (目标: {y[idx]:.3f})')
+            axes[1,1].set_title(f'随机{n_samples}个样本的特征0')
+            axes[1,1].set_xlabel('时间步')
+            axes[1,1].legend()
+            axes[1,1].grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.show()
 
 
-def demo_sliding_window():
+def demo_new_sliding_window():
     """
-    演示不同滑窗配置的效果
+    演示新的滑窗生成器功能
     """
-    print("🚀 股票滑窗数据生成器演示")
+    print("🚀 新版滑窗生成器演示")
     print("=" * 60)
     
-    # 加载数据
+    # 数据路径
     data_path = r"d:\vscode projects\stock\csv_data\000001.SZSE_d_2022-01-01_2024-12-31.csv"
+    
+    # 读取数据
     df = pd.read_csv(data_path)
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime').reset_index(drop=True)
     
-    print(f"📊 加载数据: {len(df)} 条记录")
+    print(f"📊 数据加载完成: {len(df)} 条记录")
     print(f"📅 时间范围: {df['datetime'].min()} 到 {df['datetime'].max()}")
     
-    # 配置不同的滑窗参数进行演示
-    configs = [
+    # 测试配置
+    test_configs = [
         {
-            'name': '短期价格预测',
+            'name': '手工特征 - 短期预测',
             'window_size': 30,
             'prediction_steps': 1,
             'target_type': 'return',
+            'feature_type': 'manual',
             'stride': 1
         },
         {
-            'name': '中期趋势预测',
+            'name': '手工特征 - 中期预测', 
             'window_size': 60,
             'prediction_steps': 5,
-            'target_type': 'return_multi',
+            'target_type': 'return',
+            'feature_type': 'manual',
             'stride': 5
         },
         {
-            'name': '涨跌方向分类',
+            'name': '组合特征 - 分类预测',
             'window_size': 20,
             'prediction_steps': 3,
             'target_type': 'direction',
-            'stride': 1
-        },
-        {
-            'name': '高低点预测',
-            'window_size': 40,
-            'prediction_steps': 10,
-            'target_type': 'high_low',
-            'stride': 3
+            'feature_type': 'manual',  # 暂时只用手工特征，避免tsfresh问题
+            'stride': 1,
+            'max_auto_features': 30
         }
     ]
     
     results = {}
     
-    for config in configs:
-        print(f"\n" + "="*50)
-        print(f"🔧 测试配置: {config['name']}")
-        print(f"="*50)
+    for i, config in enumerate(test_configs):
+        print(f"\n{'='*60}")
+        print(f"🔬 配置 {i+1}: {config['name']}")
+        print(f"{'='*60}")
         
         # 创建生成器
         generator = SlidingWindowGenerator(
             window_size=config['window_size'],
             prediction_steps=config['prediction_steps'],
             target_type=config['target_type'],
-            stride=config['stride']
+            feature_type=config['feature_type'],
+            stride=config['stride'],
+            max_auto_features=config.get('max_auto_features', 50)
         )
         
         # 生成样本
@@ -427,14 +420,14 @@ def demo_sliding_window():
         
         # 保存结果
         results[config['name']] = {
+            'generator': generator,
             'X': X,
-            'y': y, 
-            'metadata': metadata,
-            'generator': generator
+            'y': y,
+            'metadata': metadata
         }
         
-        # 可视化（只展示第一个配置）
-        if config == configs[0]:
+        # 第一个配置展示可视化
+        if i == 0:
             generator.visualize_samples(X, y, metadata)
     
     return results
@@ -442,47 +435,116 @@ def demo_sliding_window():
 
 def practical_examples():
     """
-    实际应用的最佳实践示例
+    展示最佳实践建议
     """
-    print("\n🎯 滑窗设计最佳实践")
+    print("\n" + "=" * 60)
+    print("💡 滑窗设计最佳实践")
     print("=" * 60)
     
-    print("1. 短线交易（日内/短线）:")
-    print("   - 窗口: 5-20天")
-    print("   - 预测: 1-3天")
-    print("   - 目标: 涨跌方向或短期收益")
-    print("   - 特点: 反应快，噪音多")
+    practices = {
+        "短线交易 (1-3天)": {
+            "窗口大小": "5-20天",
+            "预测步长": "1-3天",
+            "特征类型": "手工特征 + 短期技术指标",
+            "适用场景": "日内交易、短期波动捕捉"
+        },
+        "中线交易 (5-20天)": {
+            "窗口大小": "30-60天", 
+            "预测步长": "5-10天",
+            "特征类型": "组合特征",
+            "适用场景": "趋势跟踪、波段操作"
+        },
+        "长线交易 (30天+)": {
+            "窗口大小": "60-120天",
+            "预测步长": "20-30天", 
+            "特征类型": "自动特征 + 宏观指标",
+            "适用场景": "价值投资、长期趋势"
+        }
+    }
     
-    print("\n2. 中线交易（波段）:")
-    print("   - 窗口: 30-60天")
-    print("   - 预测: 5-10天")
-    print("   - 目标: 累计收益或趋势方向")
-    print("   - 特点: 平衡性好，适合大多数场景")
+    for strategy, params in practices.items():
+        print(f"\n📈 {strategy}:")
+        for key, value in params.items():
+            print(f"   {key}: {value}")
     
-    print("\n3. 长线交易（趋势）:")
-    print("   - 窗口: 60-120天")
-    print("   - 预测: 20-30天")
-    print("   - 目标: 长期收益或重要拐点")
-    print("   - 特点: 稳定性高，反应慢")
+    print(f"\n⚠️  常见踩坑点:")
+    print(f"   1. 窗口过小: 信息不足，模式学习困难")
+    print(f"   2. 窗口过大: 包含过时信息，计算量增加")
+    print(f"   3. stride过大: 样本数量不足，模型难以训练") 
+    print(f"   4. 未来数据泄露: 特征中包含目标值信息")
+    print(f"   5. 数据不平衡: 分类任务中正负样本比例失衡")
+    print(f"   6. 自动特征爆炸: tsfresh生成过多特征，需要筛选")
     
-    print("\n⚠️  常见踩坑点:")
-    print("1. 窗口太小 → 学不到模式，噪音大")
-    print("2. 窗口太大 → 训练慢，可能过时")
-    print("3. stride太大 → 样本少，信息丢失")
-    print("4. 未来信息泄露 → 不小心用了未来数据")
-    print("5. 数据不平衡 → 涨跌样本比例悬殊")
+    print(f"\n✅ 选择建议:")
+    print(f"   • 根据持仓周期选择prediction_steps")
+    print(f"   • 训练时stride=1，预测时可适当增加")
+    print(f"   • 手工特征优先，自动特征作为补充")
+    print(f"   • 组合特征时控制总特征数量(<100)")
+
+
+def test_boundary_fix():
+    """
+    测试边界修复效果
+    """
+    print("🧪 测试create_target边界修复效果")
+    print("=" * 50)
     
-    print("\n💡 选择建议:")
-    print("- 根据交易周期选窗口大小")
-    print("- 预测步长 = 你的持仓周期")
-    print("- stride=1 获得最多样本")
-    print("- 考虑计算资源和训练时间")
-    print("- 先简单后复杂，逐步优化")
+    # 创建简单测试数据
+    test_data = pd.DataFrame({
+        'datetime': pd.date_range('2024-01-01', periods=10, freq='D'),
+        'close': [100, 102, 105, 103, 108, 110, 107, 112, 115, 118],
+        'high': [101, 103, 106, 104, 109, 111, 108, 113, 116, 119],
+        'low': [99, 101, 104, 102, 107, 109, 106, 111, 114, 117],
+        'open': [100, 102, 105, 103, 108, 110, 107, 112, 115, 118],
+        'volume': [1000] * 10
+    })
+    
+    print(f"📊 测试数据: {len(test_data)} 天")
+    print("收盘价:", test_data['close'].tolist())
+    
+    # 测试不同target_type的边界处理
+    test_configs = [
+        ('price', 3),
+        ('return', 2), 
+        ('direction', 4)
+    ]
+    
+    for target_type, prediction_steps in test_configs:
+        print(f"\n🔍 测试 {target_type}, prediction_steps={prediction_steps}")
+        
+        generator = SlidingWindowGenerator(
+            target_type=target_type,
+            prediction_steps=prediction_steps,
+            feature_type='manual'
+        )
+        
+        target = generator.create_target(test_data)
+        
+        print(f"目标数组长度: {len(target)}")
+        print(f"NaN数量: {np.sum(np.isnan(target))}")
+        print(f"有效值数量: {np.sum(~np.isnan(target))}")
+        print(f"目标值: {target}")
+        
+        # 验证末尾是否正确填充了NaN
+        expected_nan_count = prediction_steps
+        actual_nan_count = np.sum(np.isnan(target))
+        
+        if actual_nan_count >= expected_nan_count:
+            print("✅ 边界处理正确")
+        else:
+            print("❌ 边界处理可能有问题")
+    
+    print(f"\n✅ 边界修复测试完成")
 
 
 if __name__ == "__main__":
-    # 运行演示
-    results = demo_sliding_window()
+    # 先测试边界修复
+    test_boundary_fix()
+    
+    print("\n" + "="*60)
+    
+    # 运行新版演示
+    results = demo_new_sliding_window()
     
     # 展示最佳实践
     practical_examples()
