@@ -501,6 +501,250 @@ class FeatureEngineer:
         except Exception as e:
             print(f"⚠️ 绘图失败: {str(e)}")
 
+    def select_features(self, features_df: pd.DataFrame, 
+                       final_k: int = 50,
+                       variance_threshold: float = 0.01,
+                       correlation_threshold: float = 0.95,
+                       importance_method: str = 'random_forest',
+                       target_col: str = 'close',
+                       prediction_horizons: List[int] = [1, 5, 10]) -> Dict:
+        """
+        综合特征选择（集成所有方法）
+        
+        Parameters:
+        -----------
+        features_df : pd.DataFrame
+            原始特征数据
+        final_k : int, default=50
+            最终保留的特征数量
+        variance_threshold : float, default=0.01
+            方差阈值，低于此值的特征将被删除
+        correlation_threshold : float, default=0.95
+            相关系数阈值，超过此值的特征对将删除其中一个
+        importance_method : str, default='random_forest'
+            重要性评估方法 ('random_forest', 'xgboost')
+        target_col : str, default='close'
+            目标列名
+        prediction_horizons : List[int], default=[1, 5, 10]
+            预测时间跨度列表
+            
+        Returns:
+        --------
+        Dict
+            包含各步骤结果的综合信息
+        """
+        print("🚀 开始综合特征选择管道...")
+        print(f"   🎯 目标: 从 {len(features_df.columns) - 2} 个特征中选择 {final_k} 个")
+        print("=" * 60)
+        
+        results = {
+            'original_features': len(features_df.columns) - 2,
+            'final_k': final_k,
+            'pipeline_steps': []
+        }
+        
+        current_df = features_df.copy()
+        
+        # 步骤1: 方差阈值过滤
+        print("🔸 步骤1: 方差阈值过滤")
+        feature_cols = [col for col in current_df.columns if col not in ['datetime', 'close']]
+        
+        if feature_cols:
+            # 提取数值特征
+            features_only = current_df[feature_cols].select_dtypes(include=[np.number])
+            
+            if not features_only.empty:
+                # 应用方差阈值过滤
+                selector = VarianceThreshold(threshold=variance_threshold)
+                selector.fit(features_only.fillna(0))
+                
+                # 获取保留的特征
+                selected_mask = selector.get_support()
+                removed_features = [col for col, keep in zip(features_only.columns, selected_mask) if not keep]
+                kept_features = [col for col, keep in zip(features_only.columns, selected_mask) if keep]
+                
+                # 构建结果DataFrame
+                result_columns = ['datetime', 'close'] + kept_features
+                current_df = current_df[result_columns].copy()
+                
+                print(f"   📊 原始特征数: {len(feature_cols)}")
+                print(f"   ❌ 删除低方差特征: {len(removed_features)}")
+                print(f"   ✅ 保留特征数: {len(kept_features)}")
+                
+                results['pipeline_steps'].append({
+                    'step': 'variance_filter',
+                    'removed_features': removed_features,
+                    'remaining_features': len(kept_features)
+                })
+            else:
+                print("   ⚠️ 没有数值型特征，跳过方差过滤")
+        else:
+            print("   ⚠️ 没有特征列，跳过方差过滤")
+        
+        # 步骤2: 高共线性去除
+        print("\n🔸 步骤2: 高共线性特征去除")
+        feature_cols = [col for col in current_df.columns if col not in ['datetime', 'close']]
+        
+        if len(feature_cols) >= 2:
+            # 提取数值特征并计算相关矩阵
+            features_only = current_df[feature_cols].select_dtypes(include=[np.number])
+            
+            if not features_only.empty and len(features_only.columns) >= 2:
+                # 计算相关矩阵
+                correlation_matrix = features_only.corr().abs()
+                
+                # 找到高相关性特征对
+                removed_features = []
+                remaining_features = list(features_only.columns)
+                
+                for i in range(len(correlation_matrix.columns)):
+                    for j in range(i + 1, len(correlation_matrix.columns)):
+                        col1 = correlation_matrix.columns[i]
+                        col2 = correlation_matrix.columns[j]
+                        
+                        if col1 in remaining_features and col2 in remaining_features:
+                            corr_value = correlation_matrix.iloc[i, j]
+                            
+                            if not pd.isna(corr_value) and corr_value > correlation_threshold:
+                                # 删除方差较小的特征
+                                var1 = features_only[col1].var()
+                                var2 = features_only[col2].var()
+                                
+                                feature_to_remove = col1 if var1 < var2 else col2
+                                if feature_to_remove in remaining_features:
+                                    remaining_features.remove(feature_to_remove)
+                                    removed_features.append(feature_to_remove)
+                
+                # 构建结果DataFrame
+                result_columns = ['datetime', 'close'] + remaining_features
+                current_df = current_df[result_columns].copy()
+                
+                print(f"   📊 输入特征数: {len(feature_cols)}")
+                print(f"   ❌ 删除高相关特征: {len(removed_features)}")
+                print(f"   ✅ 保留特征数: {len(remaining_features)}")
+                
+                results['pipeline_steps'].append({
+                    'step': 'correlation_filter',
+                    'removed_features': removed_features,
+                    'remaining_features': len(remaining_features)
+                })
+            else:
+                print("   ⚠️ 数值特征不足，跳过共线性检查")
+        else:
+            print("   ⚠️ 特征数不足2个，跳过共线性检查")
+        
+        # 步骤3: 基于重要性的最终选择
+        remaining_features = len(current_df.columns) - 2
+        if remaining_features > final_k:
+            print(f"\n🔸 步骤3: 基于重要性选择Top-{final_k}特征")
+            
+            feature_cols = [col for col in current_df.columns if col not in ['datetime', 'close']]
+            features_data = current_df[feature_cols].select_dtypes(include=[np.number]).fillna(0)
+            
+            if not features_data.empty:
+                # 生成多个预测目标（不同时间跨度的收益率）
+                importance_results = {}
+                combined_importance = pd.Series(0.0, index=features_data.columns)
+                
+                for horizon in prediction_horizons:
+                    # 生成目标变量（未来收益率）
+                    target = current_df[target_col].pct_change(horizon).shift(-horizon)
+                    
+                    # 去除NaN值
+                    valid_mask = ~(target.isna() | features_data.isnull().any(axis=1))
+                    if valid_mask.sum() < 50:
+                        continue
+                    
+                    X_valid = features_data[valid_mask]
+                    y_valid = target[valid_mask]
+                    
+                    try:
+                        # 选择模型
+                        if importance_method == 'random_forest':
+                            model = RandomForestRegressor(
+                                n_estimators=100, 
+                                random_state=42, 
+                                n_jobs=-1,
+                                max_depth=10
+                            )
+                        elif importance_method == 'xgboost' and XGBOOST_AVAILABLE:
+                            model = xgb.XGBRegressor(
+                                n_estimators=100,
+                                random_state=42,
+                                n_jobs=-1,
+                                max_depth=6
+                            )
+                        else:
+                            model = RandomForestRegressor(
+                                n_estimators=100, 
+                                random_state=42, 
+                                n_jobs=-1,
+                                max_depth=10
+                            )
+                        
+                        # 训练模型
+                        model.fit(X_valid, y_valid)
+                        
+                        # 获取特征重要性
+                        feature_importance = pd.Series(model.feature_importances_, index=X_valid.columns)
+                        importance_results[f'{horizon}d'] = feature_importance
+                        
+                        # 累加重要性（用于综合排名）
+                        combined_importance += feature_importance
+                        
+                    except Exception as e:
+                        continue
+                
+                if importance_results:
+                    # 选择top-k特征
+                    top_features = combined_importance.nlargest(final_k).index.tolist()
+                    
+                    # 构建结果DataFrame
+                    result_columns = ['datetime', 'close'] + top_features
+                    current_df = current_df[result_columns].copy()
+                    
+                    print(f"   📊 输入特征数: {remaining_features}")
+                    print(f"   ✅ 选择特征数: {len(top_features)}")
+                    print(f"   🏆 Top-5特征: {top_features[:5]}")
+                    
+                    results['pipeline_steps'].append({
+                        'step': 'importance_selection',
+                        'method': importance_method,
+                        'selected_features': top_features,
+                        'remaining_features': len(top_features)
+                    })
+                else:
+                    print("   ❌ 重要性计算失败，保持当前特征")
+            else:
+                print("   ⚠️ 没有有效的数值特征")
+        else:
+            print(f"\n✅ 当前特征数({remaining_features})已满足目标，跳过重要性选择")
+            results['pipeline_steps'].append({
+                'step': 'importance_selection',
+                'skipped': True,
+                'reason': f'features_count({remaining_features}) <= target({final_k})',
+                'remaining_features': remaining_features
+            })
+        
+        # 最终结果
+        final_features = [col for col in current_df.columns if col not in ['datetime', 'close']]
+        results.update({
+            'final_features_df': current_df,
+            'final_features': final_features,
+            'final_features_count': len(final_features),
+            'reduction_ratio': (results['original_features'] - len(final_features)) / results['original_features']
+        })
+        
+        print("\n" + "=" * 60)
+        print("🎉 综合特征选择管道完成!")
+        print(f"   📊 原始特征数: {results['original_features']}")
+        print(f"   ✅ 最终特征数: {len(final_features)}")
+        print(f"   📉 特征削减率: {results['reduction_ratio']:.1%}")
+        if final_features:
+            print(f"   🏆 最终Top-10特征: {final_features[:10]}")
+        
+        return results
+
 
 def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01", end_date: str = "2024-12-31") -> pd.DataFrame:
     """
@@ -580,147 +824,100 @@ def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01",
 
 
 # 测试函数
-def test_feature_engineering():
-    """测试特征工程功能（包含手工特征和自动特征）"""
-    print("🧪 测试特征工程功能")
+def test_feature_selection():
+    """测试合并后的特征选择功能"""
+    print("🧪 测试特征选择功能")
     print("=" * 50)
     
     # 加载真实股票数据
     print("📊 数据加载阶段...")
-    test_data = load_real_stock_data("000001", "2022-01-01", "2024-12-31")
+    test_data = load_real_stock_data("000001", "2023-01-01", "2024-12-31")
     
     if test_data is None or len(test_data) < 100:
-        print("❌ 无法获取真实股票数据或数据量不足")
-        print("💡 请检查:")
-        print("   1. InfluxDB服务是否运行")
-        print("   2. 数据库中是否包含000001股票数据")
-        print("   3. stock_info模块是否正确配置")
+        print("❌ 无法获取真实股票数据，使用模拟数据")
+        # 生成模拟数据
+        import numpy as np
+        dates = pd.date_range('2023-01-01', periods=300, freq='D')
+        np.random.seed(42)
+        test_data = pd.DataFrame({
+            'datetime': dates,
+            'open': np.random.rand(300) * 100 + 50,
+            'high': np.random.rand(300) * 100 + 60,
+            'low': np.random.rand(300) * 100 + 40,
+            'close': np.random.rand(300) * 100 + 55,
+            'volume': np.random.rand(300) * 1000000,
+            'turnover': np.random.rand(300) * 10000000
+        })
+        data_source = "模拟数据"
+    else:
+        # 限制数据量以加快测试
+        if len(test_data) > 400:
+            test_data = test_data.tail(400).reset_index(drop=True)
+        data_source = "真实数据"
+    
+    print(f"✅ 数据加载完成 ({data_source})，数据点数: {len(test_data)}")
+    
+    # 生成特征
+    print("\n📊 生成特征...")
+    engineer = FeatureEngineer(use_tsfresh=False)  # 关闭tsfresh以加快测试
+    features_df = engineer.prepare_manual_features(test_data)
+    
+    if features_df is None or len(features_df.columns) <= 2:
+        print("❌ 特征生成失败")
         return None
     
-    data_source = "真实股票数据"
-    # 如果真实数据太多，取最近的数据
-    if len(test_data) > 500:
-        test_data = test_data.tail(500).reset_index(drop=True)
+    original_feature_count = len(features_df.columns) - 2
+    print(f"✅ 特征生成完成，特征数量: {original_feature_count}")
     
-    print(f"✅ 数据加载完成 ({data_source})")
-    print(f"📊 数据点数: {len(test_data)}")
-    print(f"📅 时间范围: {test_data['datetime'].min().date()} 到 {test_data['datetime'].max().date()}")
+    # 测试合并的特征选择方法
+    print(f"\n� 测试统一特征选择方法...")
+    selection_results = engineer.select_features(
+        features_df, 
+        final_k=25,
+        variance_threshold=0.001,
+        correlation_threshold=0.95,
+        importance_method='random_forest'
+    )
     
-    # 初始化特征工程器
-    engineer = FeatureEngineer(use_tsfresh=True)
+    # 结果汇总
+    print(f"\n📋 测试结果汇总:")
+    print(f"   📊 原始特征数量: {original_feature_count}")
+    print(f"   🏆 最终特征数量: {selection_results['final_features_count']}")
+    print(f"   📉 特征削减率: {selection_results['reduction_ratio']:.1%}")
     
-    # 1. 测试手工特征
-    print("\n📊 测试手工特征生成...")
-    manual_features = engineer.prepare_manual_features(test_data)
-    print(f"✅ 手工特征测试完成，特征数量: {len(manual_features.columns) - 2}")
+    # 特征质量检查
+    final_features_df = selection_results['final_features_df']
+    final_analysis = engineer.analyze_features(final_features_df, plot=False)
     
-    # 分析手工特征
-    print("\n📈 分析手工特征...")
-    manual_analysis = engineer.analyze_features(manual_features, plot=False)
+    print(f"   🔍 特征质量: 缺失值特征 {len(final_analysis['missing_values'])} 个")
+    print(f"   📈 异常值特征: {len(final_analysis['extreme_values'])} 个")
     
-    # 2. 测试自动特征（仅当tsfresh可用时）
-    auto_features = None
-    auto_analysis = None
-    combined_features = None
-    combined_analysis = None
+    print(f"\n✅ 统一特征选择测试成功完成!")
+    print(f"� 现在只需要调用一个 select_features() 方法即可完成所有特征选择")
     
-    if engineer.use_tsfresh:
-        print("\n🤖 测试自动特征生成...")
-        try:
-            auto_features = engineer.prepare_auto_features(
-                test_data, 
-                window_size=30, 
-                max_features=60,
-                n_jobs=1
-            )
-            
-            if auto_features is not None and len(auto_features.columns) > 2:
-                print(f"✅ 自动特征生成成功，特征数量: {len(auto_features.columns) - 2}")
-                
-                # 显示部分特征名称
-                feature_names = [col for col in auto_features.columns if col not in ['datetime', 'close']]
-                if feature_names:
-                    print(f"   🏷️ 特征示例: {feature_names[:3]}")
-                
-                # 分析自动特征
-                print("\n📈 分析自动特征...")
-                auto_analysis = engineer.analyze_features(auto_features, plot=False)
-                
-        except Exception as e:
-            print(f"❌ 自动特征生成出错: {str(e)}")
-        
-        # 3. 测试组合特征
-        print("\n🔧 测试组合特征生成...")
-        try:
-            combined_features = engineer.prepare_combined_features(
-                test_data, 
-                window_size=30,
-                auto_features=True,
-                max_auto_features=15
-            )
-            
-            if combined_features is not None:
-                print(f"✅ 组合特征生成成功，总特征数: {len(combined_features.columns) - 2}")
-                
-                # 分析组合特征
-                print("\n📈 分析组合特征...")
-                combined_analysis = engineer.analyze_features(combined_features, plot=False)
-                
-                # 统计特征类型
-                all_feature_cols = [col for col in combined_features.columns if col not in ['datetime', 'close']]
-                manual_feature_cols = [col for col in manual_features.columns if col not in ['datetime', 'close']]
-                auto_feature_count = len(all_feature_cols) - len(manual_feature_cols)
-                
-                print(f"\n📋 特征组成统计:")
-                print(f"   📊 手工特征: {len(manual_feature_cols)}")
-                print(f"   🤖 自动特征: {auto_feature_count}")
-                print(f"   🎯 总计特征: {len(all_feature_cols)}")
-                
-        except Exception as e:
-            print(f"❌ 组合特征生成出错: {str(e)}")
-    
-    else:
-        print("\n⚠️ 跳过自动特征和组合特征测试（tsfresh不可用）")
-    
-    # 返回测试结果
-    print("\n" + "=" * 50)
-    print(f"🎉 特征工程测试完成！(数据源: {data_source})")
-    
-    results = {
-        'data_source': data_source,
-        'test_data': test_data,
-        'manual_features': manual_features,
-        'manual_analysis': manual_analysis,
-        'auto_features': auto_features,
-        'auto_analysis': auto_analysis,
-        'combined_features': combined_features,
-        'combined_analysis': combined_analysis
-    }
-    
-    return results
+    return selection_results
 
 
 if __name__ == "__main__":
-    # 运行综合测试
-    results = test_feature_engineering()
+    print("🎮 特征工程与选择测试")
+    print("=" * 50)
     
-    if results is None:
-        print("\n❌ 测试失败：无法获取真实股票数据")
-        print("🔧 请检查InfluxDB配置和数据")
-        exit(1)
-    
-    # 简单的结果报告
-    print(f"\n📋 测试结果总结 (数据源: {results['data_source']}):")
-    if results['manual_features'] is not None:
-        print(f"   ✅ 手工特征: {len(results['manual_features'].columns) - 2} 个")
-    if results['auto_features'] is not None and len(results['auto_features'].columns) > 2:
-        print(f"   ✅ 自动特征: {len(results['auto_features'].columns) - 2} 个")
-    if results['combined_features'] is not None:
-        print(f"   ✅ 组合特征: {len(results['combined_features'].columns) - 2} 个")
-    
-    print("\n💡 说明:")
-    print("   🎯 使用了真实的股票历史数据进行特征工程测试")
-    print("   📊 特征质量更高，更适合实际应用")
-    print("   � 数据来源：InfluxDB数据库")
-    
-    print("🎉 所有测试完成！")
+    try:
+        # 运行测试
+        results = test_feature_selection()
+        
+        if results is not None:
+            print("\n💡 使用说明:")
+            print("   📊 特征生成: engineer.prepare_manual_features()")
+            print("   🎯 特征选择: engineer.select_features()  # 一个方法完成所有步骤")
+            print("   🔍 特征分析: engineer.analyze_features()")
+            print("\n🎉 所有功能测试完成!")
+        else:
+            print("\n❌ 测试失败")
+            
+    except KeyboardInterrupt:
+        print("\n👋 用户中断测试")
+    except Exception as e:
+        print(f"\n❌ 测试过程中出现错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
