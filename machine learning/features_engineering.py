@@ -5,6 +5,8 @@
 import pandas as pd
 import numpy as np
 import warnings
+import sys
+import os
 from typing import Dict, List, Optional, Tuple
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
@@ -27,6 +29,19 @@ try:
 except ImportError:
     TSFRESH_AVAILABLE = False
     print("⚠️ tsfresh 未安装，自动特征生成不可用")
+
+# 添加stock_info路径以导入相关模块
+stock_info_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "stock_info")
+if stock_info_path not in sys.path:
+    sys.path.insert(0, stock_info_path)
+
+try:
+    import utils
+    from stock_market_data_akshare import get_history_data
+    INFLUXDB_AVAILABLE = True
+except ImportError:
+    INFLUXDB_AVAILABLE = False
+    print("⚠️ InfluxDB相关模块导入失败，无法加载真实股票数据")
 
 warnings.filterwarnings('ignore')
 
@@ -481,43 +496,243 @@ class FeatureEngineer:
             print(f"⚠️ 绘图失败: {str(e)}")
 
 
+def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01", end_date: str = "2024-12-31") -> pd.DataFrame:
+    """
+    从InfluxDB加载真实股票数据
+    
+    Parameters:
+    -----------
+    symbol : str, default="000001"
+        股票代码
+    start_date : str, default="2022-01-01"
+        开始日期
+    end_date : str, default="2024-12-31"
+        结束日期
+        
+    Returns:
+    --------
+    pd.DataFrame
+        包含OHLCV数据的DataFrame，如果加载失败则返回None
+    """
+    if not INFLUXDB_AVAILABLE:
+        print("❌ InfluxDB模块不可用，无法加载真实数据")
+        return None
+    
+    try:
+        print(f"🔗 从InfluxDB加载 {symbol} 数据...")
+        
+        # 获取InfluxDB客户端
+        client = utils.get_influxdb_client()
+        if client is None:
+            print("❌ 无法连接到InfluxDB")
+            return None
+        
+        query_api = client.query_api()
+        
+        # 转换日期格式
+        start_str_rfc = f"{start_date}T00:00:00Z"
+        end_str_rfc = f"{end_date}T23:59:59Z"
+        
+        # 获取历史数据
+        df = get_history_data(query_api, symbol, start_str_rfc, end_str_rfc)
+        
+        if df.empty:
+            print(f"❌ InfluxDB中未找到 {symbol} 的数据")
+            client.close()
+            return None
+        
+        # 标准化列名
+        column_mapping = {
+            '日期': 'datetime',
+            '开盘': 'open',
+            '最高': 'high', 
+            '最低': 'low',
+            '收盘': 'close',
+            '成交量': 'volume',
+            '成交额': 'turnover'
+        }
+        
+        df = df.rename(columns=column_mapping)
+        
+        # 确保datetime列是正确的时间格式
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.sort_values('datetime').reset_index(drop=True)
+        
+        # 添加缺失的列
+        if 'turnover' not in df.columns:
+            df['turnover'] = 0.0
+        
+        print(f"✅ 从InfluxDB成功加载 {len(df)} 条 {symbol} 数据")
+        print(f"📅 数据时间范围: {df['datetime'].min().date()} 到 {df['datetime'].max().date()}")
+        
+        client.close()
+        return df[['datetime', 'open', 'high', 'low', 'close', 'volume', 'turnover']]
+        
+    except Exception as e:
+        print(f"❌ 从InfluxDB加载数据时出错: {str(e)}")
+        return None
+
+
 # 测试函数
 def test_feature_engineering():
-    """测试特征工程功能"""
+    """测试特征工程功能（包含手工特征和自动特征）"""
     print("🧪 测试特征工程功能")
+    print("=" * 50)
     
-    # 创建测试数据
-    dates = pd.date_range('2022-01-01', periods=200, freq='D')
-    np.random.seed(42)
+    # 加载真实股票数据
+    print("📊 数据加载阶段...")
+    test_data = load_real_stock_data("000001", "2022-01-01", "2024-12-31")
     
-    test_data = pd.DataFrame({
-        'datetime': dates,
-        'open': 100 + np.cumsum(np.random.randn(200) * 0.5),
-        'high': 0,
-        'low': 0,
-        'close': 0,
-        'volume': np.random.randint(1000, 10000, 200)
-    })
+    if test_data is None or len(test_data) < 100:
+        print("❌ 无法获取真实股票数据或数据量不足")
+        print("💡 请检查:")
+        print("   1. InfluxDB服务是否运行")
+        print("   2. 数据库中是否包含000001股票数据")
+        print("   3. stock_info模块是否正确配置")
+        return None
     
-    # 生成OHLC数据
-    test_data['close'] = test_data['open'] + np.random.randn(200) * 0.3
-    test_data['high'] = np.maximum(test_data['open'], test_data['close']) + np.random.rand(200) * 0.5
-    test_data['low'] = np.minimum(test_data['open'], test_data['close']) - np.random.rand(200) * 0.5
+    data_source = "真实股票数据"
+    # 如果真实数据太多，取最近的数据
+    if len(test_data) > 500:
+        test_data = test_data.tail(500).reset_index(drop=True)
     
-    # 测试特征工程
-    engineer = FeatureEngineer()
+    print(f"✅ 数据加载完成 ({data_source})")
+    print(f"📊 数据点数: {len(test_data)}")
+    print(f"📅 时间范围: {test_data['datetime'].min().date()} 到 {test_data['datetime'].max().date()}")
     
-    # 测试手工特征
+    # 检查tsfresh可用性
+    print("\n🔍 检查tsfresh库可用性...")
+    if TSFRESH_AVAILABLE:
+        print("✅ tsfresh库已安装，将测试自动特征功能")
+        try:
+            from tsfresh import extract_features
+            # 简单功能测试
+            simple_data = pd.DataFrame({
+                'id': [1, 1, 1], 'time': [1, 2, 3], 'value': [1, 2, 3]
+            })
+            test_extract = extract_features(simple_data, column_id='id', column_sort='time')
+            print(f"   🧪 tsfresh基本功能正常，测试提取了 {len(test_extract.columns)} 个特征")
+        except Exception as e:
+            print(f"   ⚠️ tsfresh功能异常: {str(e)}")
+    else:
+        print("❌ tsfresh库未安装")
+        print("💡 安装提示: pip install tsfresh")
+    
+    # 初始化特征工程器
+    engineer = FeatureEngineer(use_tsfresh=True)
+    
+    # 1. 测试手工特征
+    print("\n📊 测试手工特征生成...")
     manual_features = engineer.prepare_manual_features(test_data)
-    print(f"📊 手工特征测试完成，特征数量: {len(manual_features.columns) - 2}")
+    print(f"✅ 手工特征测试完成，特征数量: {len(manual_features.columns) - 2}")
     
-    # 分析特征
-    analysis = engineer.analyze_features(manual_features, plot=False)
+    # 分析手工特征
+    print("\n📈 分析手工特征...")
+    manual_analysis = engineer.analyze_features(manual_features, plot=False)
     
-    return manual_features, analysis
+    # 2. 测试自动特征（仅当tsfresh可用时）
+    auto_features = None
+    auto_analysis = None
+    combined_features = None
+    combined_analysis = None
+    
+    if engineer.use_tsfresh:
+        print("\n🤖 测试自动特征生成...")
+        try:
+            auto_features = engineer.prepare_auto_features(
+                test_data, 
+                window_size=30, 
+                max_features=20,
+                n_jobs=1
+            )
+            
+            if auto_features is not None and len(auto_features.columns) > 2:
+                print(f"✅ 自动特征生成成功，特征数量: {len(auto_features.columns) - 2}")
+                
+                # 显示部分特征名称
+                feature_names = [col for col in auto_features.columns if col not in ['datetime', 'close']]
+                if feature_names:
+                    print(f"   🏷️ 特征示例: {feature_names[:3]}")
+                
+                # 分析自动特征
+                print("\n📈 分析自动特征...")
+                auto_analysis = engineer.analyze_features(auto_features, plot=False)
+                
+        except Exception as e:
+            print(f"❌ 自动特征生成出错: {str(e)}")
+        
+        # 3. 测试组合特征
+        print("\n🔧 测试组合特征生成...")
+        try:
+            combined_features = engineer.prepare_combined_features(
+                test_data, 
+                window_size=30,
+                auto_features=True,
+                max_auto_features=15
+            )
+            
+            if combined_features is not None:
+                print(f"✅ 组合特征生成成功，总特征数: {len(combined_features.columns) - 2}")
+                
+                # 分析组合特征
+                print("\n📈 分析组合特征...")
+                combined_analysis = engineer.analyze_features(combined_features, plot=False)
+                
+                # 统计特征类型
+                all_feature_cols = [col for col in combined_features.columns if col not in ['datetime', 'close']]
+                manual_feature_cols = [col for col in manual_features.columns if col not in ['datetime', 'close']]
+                auto_feature_count = len(all_feature_cols) - len(manual_feature_cols)
+                
+                print(f"\n📋 特征组成统计:")
+                print(f"   📊 手工特征: {len(manual_feature_cols)}")
+                print(f"   🤖 自动特征: {auto_feature_count}")
+                print(f"   🎯 总计特征: {len(all_feature_cols)}")
+                
+        except Exception as e:
+            print(f"❌ 组合特征生成出错: {str(e)}")
+    
+    else:
+        print("\n⚠️ 跳过自动特征和组合特征测试（tsfresh不可用）")
+    
+    # 返回测试结果
+    print("\n" + "=" * 50)
+    print(f"🎉 特征工程测试完成！(数据源: {data_source})")
+    
+    results = {
+        'data_source': data_source,
+        'test_data': test_data,
+        'manual_features': manual_features,
+        'manual_analysis': manual_analysis,
+        'auto_features': auto_features,
+        'auto_analysis': auto_analysis,
+        'combined_features': combined_features,
+        'combined_analysis': combined_analysis
+    }
+    
+    return results
 
 
 if __name__ == "__main__":
-    # 运行测试
-    features, analysis = test_feature_engineering()
-    print("✅ 特征工程测试完成")
+    # 运行综合测试
+    results = test_feature_engineering()
+    
+    if results is None:
+        print("\n❌ 测试失败：无法获取真实股票数据")
+        print("🔧 请检查InfluxDB配置和数据")
+        exit(1)
+    
+    # 简单的结果报告
+    print(f"\n📋 测试结果总结 (数据源: {results['data_source']}):")
+    if results['manual_features'] is not None:
+        print(f"   ✅ 手工特征: {len(results['manual_features'].columns) - 2} 个")
+    if results['auto_features'] is not None and len(results['auto_features'].columns) > 2:
+        print(f"   ✅ 自动特征: {len(results['auto_features'].columns) - 2} 个")
+    if results['combined_features'] is not None:
+        print(f"   ✅ 组合特征: {len(results['combined_features'].columns) - 2} 个")
+    
+    print("\n💡 说明:")
+    print("   🎯 使用了真实的股票历史数据进行特征工程测试")
+    print("   📊 特征质量更高，更适合实际应用")
+    print("   � 数据来源：InfluxDB数据库")
+    
+    print("🎉 所有测试完成！")
