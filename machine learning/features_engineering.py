@@ -459,15 +459,6 @@ class FeatureEngineer:
         
         return analysis
     
-    def _calculate_rsi(self, prices: pd.Series, window: int = 14) -> pd.Series:
-        """手工计算RSI"""
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
-    
     def _plot_feature_analysis(self, features_df: pd.DataFrame, max_plots: int = 12):
         """绘制特征分析图表"""
         try:
@@ -600,24 +591,6 @@ def test_feature_engineering():
     print(f"📊 数据点数: {len(test_data)}")
     print(f"📅 时间范围: {test_data['datetime'].min().date()} 到 {test_data['datetime'].max().date()}")
     
-    # 检查tsfresh可用性
-    print("\n🔍 检查tsfresh库可用性...")
-    if TSFRESH_AVAILABLE:
-        print("✅ tsfresh库已安装，将测试自动特征功能")
-        try:
-            from tsfresh import extract_features
-            # 简单功能测试
-            simple_data = pd.DataFrame({
-                'id': [1, 1, 1], 'time': [1, 2, 3], 'value': [1, 2, 3]
-            })
-            test_extract = extract_features(simple_data, column_id='id', column_sort='time')
-            print(f"   🧪 tsfresh基本功能正常，测试提取了 {len(test_extract.columns)} 个特征")
-        except Exception as e:
-            print(f"   ⚠️ tsfresh功能异常: {str(e)}")
-    else:
-        print("❌ tsfresh库未安装")
-        print("💡 安装提示: pip install tsfresh")
-    
     # 初始化特征工程器
     engineer = FeatureEngineer(use_tsfresh=True)
     
@@ -642,7 +615,7 @@ def test_feature_engineering():
             auto_features = engineer.prepare_auto_features(
                 test_data, 
                 window_size=30, 
-                max_features=20,
+                max_features=60,
                 n_jobs=1
             )
             

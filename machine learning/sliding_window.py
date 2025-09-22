@@ -17,7 +17,7 @@ from typing import Tuple, List, Optional, Dict, Any
 import warnings
 
 # 导入特征工程模块
-from feature_engineering import FeatureEngineer
+from features_engineering import FeatureEngineer
 
 warnings.filterwarnings('ignore')
 
