@@ -665,16 +665,21 @@ class FeatureEngineer:
                 n_samples = len(features_data)
                 split_idx = int(n_samples * train_ratio)
                 
+                # ========== 阶段8改进: 添加max_horizon purge ==========
+                max_horizon = 10  # 最大预测窗口
+                purge_split_idx = split_idx - max_horizon
+                
                 # 确保训练集有足够样本
-                if split_idx < 50:
-                    print(f"   ⚠️ 训练样本过少({split_idx}<50)，跳过重要性选择")
+                if purge_split_idx < 50:
+                    print(f"   ⚠️ 训练样本过少({purge_split_idx}<50)，跳过重要性选择")
                     feature_importance_dict = {}
                 else:
                     print(f"   📊 时间切分: 训练集 {split_idx}/{n_samples} ({train_ratio:.1%})")
+                    print(f"   🔒 Purge applied: 去除末尾{max_horizon}行，实际训练样本 {purge_split_idx}")
                     
-                    # 只使用训练集计算特征重要性
-                    train_features = features_data.iloc[:split_idx].copy()
-                    train_close = current_df['close'].iloc[:split_idx]
+                    # 只使用purge后的训练集计算特征重要性
+                    train_features = features_data.iloc[:purge_split_idx].copy()
+                    train_close = current_df['close'].iloc[:purge_split_idx]
                     
                     # 生成目标变量（只在训练集内）
                     importance_results = {}
@@ -805,12 +810,30 @@ class FeatureEngineer:
         if final_features:
             print(f"   🏆 最终Top-10特征: {final_features[:10]}")
         
+        # ===== 阶段8改进: 保存最终特征清单 =====
+        try:
+            # 确保ML output目录存在
+            output_dir = os.path.join("machine learning", "ML output")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # 保存特征清单文件
+            feature_list_path = os.path.join(output_dir, "final_feature_list.txt")
+            with open(feature_list_path, 'w', encoding='utf-8') as f:
+                for feature in final_features:
+                    f.write(f"{feature}\n")
+            
+            print(f"   📋 特征清单已保存: {feature_list_path}")
+            print(f"   📝 包含 {len(final_features)} 个特征名称")
+            
+        except Exception as e:
+            print(f"   ⚠️ 特征清单保存失败: {e}")
+        
         return results
 
     def scale_features(self, features_df: pd.DataFrame, 
                        scaler_type: str = 'robust',
                        train_ratio: float = 0.8,
-                       save_path: str = 'machine learning/scaler.pkl',
+                       save_path: str = 'machine learning/ML output/scaler.pkl',
                        exclude_cols: Optional[List[str]] = None) -> Dict:
         """
         对特征做尺度标准化（时间序列防泄漏：仅用训练段 fit，其余段 transform）
@@ -962,6 +985,20 @@ class FeatureEngineer:
             scaled_range = scaled_ranges[feature]
             print(f"   {i}. {feature}: {orig_range:.4f} → {scaled_range:.4f} (压缩 {ratio:.1f}x)")
         
+        # ===== 阶段8改进: 保存标准化后的特征数据 =====
+        try:
+            # 构建scaled_features.csv保存路径
+            csv_path = save_path.replace('.pkl', '_scaled_features.csv')
+            scaled_df.to_csv(csv_path, index=True, encoding='utf-8-sig')
+            
+            file_size = os.path.getsize(csv_path) / 1024 / 1024  # MB
+            print(f"   📊 标准化特征已保存: {os.path.basename(csv_path)}")
+            print(f"   💾 文件大小: {file_size:.2f} MB，供PCA等后续分析使用")
+            
+        except Exception as e:
+            print(f"   ⚠️ 标准化特征保存失败: {e}")
+            csv_path = None
+        
         return {
             'scaled_df': scaled_df,
             'scaler': scaler,
@@ -970,6 +1007,7 @@ class FeatureEngineer:
             'feature_cols': feature_cols,
             'scaler_path': save_path,
             'meta_path': meta_path,
+            'csv_path': csv_path,  # 新增：CSV文件路径
             'scaler_type': scaler_type,
             'train_samples': split_idx,
             'feature_count': len(feature_cols)
@@ -1232,7 +1270,7 @@ if __name__ == "__main__":
             selection_results['final_features_df'],
             scaler_type='robust',  # 金融数据推荐使用RobustScaler
             train_ratio=0.8,       # 与特征选择保持一致的时间切分
-            save_path='machine learning/feature_scaler.pkl'
+            save_path='machine learning/ML output/feature_scaler.pkl'
         )
         scaled_df = scale_results['scaled_df']
         print(f"✅ 特征标准化完成，缩放器已保存到 {scale_results['scaler_path']}")

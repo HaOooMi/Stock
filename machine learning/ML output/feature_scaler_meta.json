@@ -3,23 +3,23 @@
     "rolling_std_30d",
     "atr_14",
     "rolling_std_20d",
-    "macd_hist",
     "price_position_20d",
+    "macd_hist",
     "skewness_20d",
-    "auto_volume__maximum",
     "auto_close__maximum",
     "kurtosis_20d",
-    "volume_ma_5",
     "rolling_std_10d",
+    "auto_volume__maximum",
     "rolling_std_5d",
+    "volume_ma_5",
     "volume_roc_3d",
     "volume_roc_10d",
     "auto_close__minimum",
-    "price_position_10d",
     "macd",
+    "price_position_10d",
+    "rsi_14",
     "auto_volume__minimum",
-    "volume_ratio_20d",
-    "volume_roc_5d"
+    "volume_ratio_20d"
   ],
   "scaler_type": "robust",
   "train_ratio": 0.8,
@@ -33,6 +33,6 @@
     "2024-08-22",
     "2024-12-31"
   ],
-  "fit_timestamp": "2025-09-24T18:22:53.176370",
+  "fit_timestamp": "2025-09-24T20:54:18.535419",
   "feature_count": 20
 }
