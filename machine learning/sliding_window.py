@@ -19,7 +19,7 @@ import sys
 import os
 
 # 导入特征工程模块
-from features_engineering import FeatureEngineer
+from feature_engineering import FeatureEngineer
 
 # 添加stock_info路径以导入相关模块
 stock_info_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "stock_info")

@@ -29,7 +29,7 @@ from stock_market_data_akshare import get_history_data
 # 机器学习相关 
 from sklearn.feature_selection import VarianceThreshold, SelectKBest, mutual_info_regression
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 
 # 尝试导入可选库
 try:
@@ -71,7 +71,7 @@ class FeatureEngineer:
     4. 特征质量分析
     """
     
-    def __init__(self, use_talib: bool = True, use_tsfresh: bool = True):
+    def __init__(self, use_talib: bool = True, use_tsfresh: bool = False):
         """
         初始化特征工程器
         
@@ -326,21 +326,36 @@ class FeatureEngineer:
                 if tsfresh_data:
                     tsfresh_df = pd.DataFrame(tsfresh_data)
                     
-                    # 提取特征
+                    # 提取特征（区分不同变量类型）
                     from tsfresh.feature_extraction import MinimalFCParameters
                     extracted_features = extract_features(
                         tsfresh_df,
                         column_id='id',
                         column_sort='time',
                         column_value='value',
-                        default_fc_parameters=MinimalFCParameters()
+                        column_kind='variable',  # 关键：区分close和volume变量
+                        default_fc_parameters=MinimalFCParameters(),
+                        disable_progressbar=True,  # 禁用进度条
+                        n_jobs=1  # 单线程避免潜在问题
                     )
                     
-                    # 选择最重要的特征
-                    if len(extracted_features.columns) > max_auto_features:
-                        feature_vars = extracted_features.var()
-                        selected_features = feature_vars.nlargest(max_auto_features).index
+                    # 重命名特征，保持语义清晰（close__variance -> auto_close__variance）
+                    renamed_features = {}
+                    for col in extracted_features.columns:
+                        renamed_features[col] = f'auto_{col}'
+                    extracted_features = extracted_features.rename(columns=renamed_features)
+                    
+                    # 选择最重要的特征（基于方差）
+                    auto_cols_renamed = [col for col in extracted_features.columns if col.startswith('auto_')]
+                    if len(auto_cols_renamed) > max_auto_features:
+                        # 基于方差选择top-k特征
+                        feature_vars = extracted_features[auto_cols_renamed].var()
+                        selected_features = feature_vars.nlargest(max_auto_features).index.tolist()
                         extracted_features = extracted_features[selected_features]
+                        print(f"   🎯 基于方差选择了 {len(selected_features)} 个最优特征")
+                    
+                    # 创建临时数据框
+                    temp_auto_df = pd.DataFrame(extracted_features)
                     
                     # 创建自动特征结果数据框
                     result_indices = range(window_size, len(clean_data))
@@ -349,12 +364,14 @@ class FeatureEngineer:
                         'time_idx': result_indices  # 使用相同的时间索引
                     })
                     
-                    # 添加自动特征
-                    for col in extracted_features.columns:
-                        auto_result[f'auto_{col}'] = extracted_features[col].values
+                    # 添加自动特征（清洗将在select_features中进行）
+                    final_auto_cols = [col for col in temp_auto_df.columns if col.startswith('auto_')]
+                    for col in final_auto_cols:
+                        auto_result[col] = temp_auto_df[col].values
                     
                     auto_result = auto_result.dropna()
-                    print(f"   ✅ 自动特征生成完成，特征数量: {len(extracted_features.columns)}")
+                    final_auto_count = len([col for col in auto_result.columns if col.startswith('auto_')])
+                    print(f"   ✅ 自动特征生成完成，最终特征数量: {final_auto_count}")
                     
                     # 合并手工特征和自动特征 - 使用time_idx进行匹配
                     manual_times = set(manual_result['time_idx'])
@@ -380,8 +397,14 @@ class FeatureEngineer:
                             combined_result.index = clean_data.index[time_indices]
                             combined_result = combined_result.drop('time_idx', axis=1)  # 删除临时索引列
                         
-                        feature_count = len(combined_result.columns) - 1  # 排除close列
-                        print(f"✅ 特征合并完成，共享样本: {len(common_times)}, 总特征数量: {feature_count}")
+                        # 计算合并后的特征统计
+                        total_features = len(combined_result.columns) - 1  # 排除close列
+                        manual_features = len([col for col in combined_result.columns if not col.startswith('auto_') and col != 'close'])
+                        auto_features = len([col for col in combined_result.columns if col.startswith('auto_')])
+                        
+                        print(f"✅ 特征合并完成:")
+                        print(f"   📈 共享样本: {len(common_times)}")
+                        print(f"   🔢 总特征数: {total_features} (手工:{manual_features} + 自动:{auto_features})")
                         
                         return combined_result
                     else:
@@ -399,13 +422,13 @@ class FeatureEngineer:
             manual_result = manual_result.drop('time_idx', axis=1)
         
         feature_count = len(manual_result.columns) - 1  # 排除close列
-        print(f"✅ 手工特征生成完成，特征数量: {feature_count}")
+        print(f"✅ 特征生成完成，手工特征数量: {feature_count}")
         
         return manual_result
 
     def select_features(self, features_df: pd.DataFrame, final_k: int = 20,
                        variance_threshold: float = 0.01, correlation_threshold: float = 0.95,
-                       importance_method: str = 'random_forest') -> Dict:
+                       importance_method: str = 'random_forest', train_ratio: float = 0.8) -> Dict:
         """
         统一的特征选择管道 - 整合了方差过滤、相关性去除和重要性选择
         
@@ -446,8 +469,88 @@ class FeatureEngineer:
         
         current_df = features_df.copy()
         
+        # 步骤0: 自动特征清洗（如果存在）
+        auto_cols = [col for col in current_df.columns if col.startswith('auto_')]
+        if auto_cols:
+            print("🧽 步骤0: 自动特征清洗")
+            original_auto_count = len(auto_cols)
+            removed_features = []
+            removal_reasons = {}
+            
+            for col in auto_cols:
+                data = current_df[col]
+                should_remove = False
+                reason = ""
+                
+                # 1. 检查无穷值和NaN
+                if not np.isfinite(data).all():
+                    should_remove = True
+                    reason = "包含无穷值或NaN"
+                elif data.std() < 1e-10:
+                    # 2. 检查常数特征
+                    should_remove = True
+                    reason = "常数特征（方差接近于0）"
+                elif abs(data.mean()) > 1e10 or data.std() > 1e10:
+                    # 3. 检查数值范围异常
+                    should_remove = True
+                    reason = f"数值范围异常（均值:{abs(data.mean()):.2e}, 标准差:{data.std():.2e}）"
+                elif col.endswith('__sum_values'):
+                    # 4. 移除结构性冗余特征（窗口求和）
+                    should_remove = True
+                    reason = "结构性冗余（窗口求和，与均值等价）"
+                elif col.endswith('__variance') and any(c.endswith('__standard_deviation') and c.replace('__standard_deviation', '') == col.replace('__variance', '') for c in current_df.columns):
+                    # 5. 如果同时存在variance和standard_deviation，保留后者
+                    should_remove = True
+                    reason = "已存在对应的standard_deviation特征"
+                else:
+                    # 6. 检查极端分布
+                    try:
+                        skew_val = data.skew()
+                        kurt_val = data.kurtosis()
+                        if abs(skew_val) > 15 or abs(kurt_val) > 200:
+                            should_remove = True
+                            reason = f"极端分布（偏度:{skew_val:.2f}, 峰度:{kurt_val:.2f}）"
+                    except:
+                        pass
+                        
+                if should_remove:
+                    removed_features.append(col)
+                    removal_reasons[col] = reason
+            
+            # 执行移除
+            if removed_features:
+                current_df = current_df.drop(columns=removed_features)
+                remaining_auto_cols = [col for col in current_df.columns if col.startswith('auto_')]
+                
+                print(f"   ❌ 移除异常自动特征: {len(removed_features)}/{original_auto_count}")
+                # 显示前3个被移除特征的原因
+                for i, feature in enumerate(removed_features[:3]):
+                    reason = removal_reasons.get(feature, "未知原因")
+                    print(f"      {i+1}. {feature}: {reason}")
+                if len(removed_features) > 3:
+                    print(f"      ... 还有 {len(removed_features) - 3} 个")
+                    
+                print(f"   ✅ 保留有效自动特征: {len(remaining_auto_cols)}个")
+                
+                results['pipeline_steps'].append({
+                    'step': 'auto_feature_cleaning',
+                    'original_auto_features': original_auto_count,
+                    'removed_features': removed_features,
+                    'remaining_auto_features': len(remaining_auto_cols),
+                    'removal_reasons': removal_reasons
+                })
+            else:
+                print("   ✅ 所有自动特征都通过了质量检查")
+                results['pipeline_steps'].append({
+                    'step': 'auto_feature_cleaning',
+                    'original_auto_features': original_auto_count,
+                    'removed_features': [],
+                    'remaining_auto_features': original_auto_count,
+                    'removal_reasons': {}
+                })
+        
         # 步骤1: 方差阈值过滤
-        print("🔸 步骤1: 方差阈值过滤")
+        print("\n🔸 步骤1: 方差阈值过滤")
         # 动态检查datetime列
         datetime_col = 'datetime' if 'datetime' in current_df.columns else None
         exclude_cols = ['close']
@@ -553,76 +656,115 @@ class FeatureEngineer:
         remaining_features = len(current_df.columns) - len(exclude_cols)
         
         if remaining_features > final_k:
-            print(f"\n🔸 步骤3: 基于重要性选择Top-{final_k}特征")
+            print(f"\n🔸 步骤3: 基于重要性选择Top-{final_k}特征 (防泄漏: train_ratio={train_ratio:.1%})")
             
             feature_cols = [col for col in current_df.columns if col not in exclude_cols]
             features_data = current_df[feature_cols].select_dtypes(include=[np.number]).fillna(0)
             
             if not features_data.empty:
-                # 生成多个预测目标（不同时间跨度的收益率）
-                importance_results = {}
-                combined_importance = pd.Series(0.0, index=features_data.columns)
+                # ========== 时间序列切分防止数据泄漏 ==========
+                n_samples = len(features_data)
+                split_idx = int(n_samples * train_ratio)
                 
-                # 为不同的预测目标计算特征重要性
-                targets = {
-                    'return_1d': current_df['close'].pct_change().shift(-1),
-                    'return_5d': current_df['close'].pct_change(5).shift(-5),
-                    'return_10d': current_df['close'].pct_change(10).shift(-10)
-                }
-                
-                for target_name, target_values in targets.items():
-                    try:
-                        # 准备训练数据
-                        valid_indices = ~(target_values.isna() | features_data.isna().any(axis=1))
-                        if valid_indices.sum() < 50:  # 至少需要50个样本
-                            continue
-                            
-                        X = features_data[valid_indices]
-                        y = target_values[valid_indices]
-                        
-                        # 选择模型
-                        if importance_method == 'xgboost' and self.use_xgboost:
-                            model = XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
-                        else:
-                            model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-                        
-                        # 训练模型并获取特征重要性
-                        model.fit(X, y)
-                        feature_importance = pd.Series(model.feature_importances_, index=X.columns)
-                        importance_results[target_name] = feature_importance
-                        
-                        # 累加重要性（用于综合排名）
-                        combined_importance += feature_importance
-                        
-                    except Exception as e:
-                        continue
-                
-                if importance_results:
-                    # 选择top-k特征
-                    top_features = combined_importance.nlargest(final_k).index.tolist()
-                    
-                    # 构建结果DataFrame
-                    result_columns = ['close'] + top_features
-                    if datetime_col:
-                        result_columns = [datetime_col] + result_columns
-                    current_df = current_df[result_columns].copy()
-                    
-                    print(f"   📊 输入特征数: {remaining_features}")
-                    print(f"   ✅ 选择特征数: {final_k}")
-                    print(f"   🏆 Top-5特征: {top_features[:5]}")
-                    
-                    # 保存特征重要性用于返回
-                    feature_importance_dict = dict(combined_importance.nlargest(final_k))
-                    
-                    results['pipeline_steps'].append({
-                        'step': 'importance_selection',
-                        'method': importance_method,
-                        'selected_features': top_features,
-                        'feature_importance': feature_importance_dict
-                    })
-                else:
-                    print("   ⚠️ 重要性计算失败，保持当前特征")
+                # 确保训练集有足够样本
+                if split_idx < 50:
+                    print(f"   ⚠️ 训练样本过少({split_idx}<50)，跳过重要性选择")
                     feature_importance_dict = {}
+                else:
+                    print(f"   📊 时间切分: 训练集 {split_idx}/{n_samples} ({train_ratio:.1%})")
+                    
+                    # 只使用训练集计算特征重要性
+                    train_features = features_data.iloc[:split_idx].copy()
+                    train_close = current_df['close'].iloc[:split_idx]
+                    
+                    # 生成目标变量（只在训练集内）
+                    importance_results = {}
+                    combined_importance = pd.Series(0.0, index=train_features.columns)
+                    
+                    targets = {
+                        'return_1d': train_close.pct_change().shift(-1),
+                        'return_5d': train_close.pct_change(5).shift(-5), 
+                        'return_10d': train_close.pct_change(10).shift(-10)
+                    }
+                    
+                    valid_targets = 0
+                    for target_name, target_values in targets.items():
+                        try:
+                            # 准备训练数据（确保目标值有效且不使用未来数据）
+                            valid_mask = ~(target_values.isna() | train_features.isna().any(axis=1))
+                            valid_count = valid_mask.sum()
+                            
+                            if valid_count < 30:  # 每个目标至少30个样本
+                                print(f"     ⚠️ {target_name}: 有效样本不足({valid_count}<30)")
+                                continue
+                                
+                            X_train = train_features[valid_mask]
+                            y_train = target_values[valid_mask]
+                            
+                            # 选择模型
+                            if importance_method == 'xgboost' and self.use_xgboost:
+                                model = XGBRegressor(
+                                    n_estimators=100, 
+                                    max_depth=6,
+                                    learning_rate=0.1,
+                                    random_state=42, 
+                                    verbosity=0
+                                )
+                            else:
+                                model = RandomForestRegressor(
+                                    n_estimators=100, 
+                                    max_depth=10,
+                                    min_samples_leaf=5,
+                                    random_state=42, 
+                                    n_jobs=-1
+                                )
+                            
+                            # 训练模型并获取特征重要性
+                            model.fit(X_train, y_train)
+                            feature_importance = pd.Series(model.feature_importances_, index=X_train.columns)
+                            
+                            # 标准化重要性分数避免偏置
+                            if feature_importance.sum() > 0:
+                                feature_importance = feature_importance / feature_importance.sum()
+                                importance_results[target_name] = feature_importance
+                                combined_importance += feature_importance
+                                valid_targets += 1
+                                print(f"     ✅ {target_name}: {valid_count}样本, Top特征: {feature_importance.nlargest(3).index.tolist()}")
+                            
+                        except Exception as e:
+                            print(f"     ❌ {target_name}: 计算失败 - {str(e)}")
+                            continue
+                
+                    if valid_targets > 0 and combined_importance.sum() > 0:
+                        # 选择top-k特征（基于无泄漏的重要性分数）
+                        top_features = combined_importance.nlargest(final_k).index.tolist()
+                        
+                        # 构建结果DataFrame（应用到全量数据但不重新训练）
+                        result_columns = ['close'] + top_features
+                        if datetime_col:
+                            result_columns = [datetime_col] + result_columns
+                        current_df = current_df[result_columns].copy()
+                        
+                        print(f"   📊 输入特征数: {remaining_features}")
+                        print(f"   ✅ 选择特征数: {len(top_features)}")
+                        print(f"   🎯 有效目标数: {valid_targets}/3")
+                        print(f"   🏆 Top-5特征: {top_features[:5]}")
+                        
+                        # 保存特征重要性用于返回
+                        feature_importance_dict = dict(combined_importance.nlargest(final_k))
+                        
+                        results['pipeline_steps'].append({
+                            'step': 'importance_selection',
+                            'method': importance_method,
+                            'train_ratio': train_ratio,
+                            'train_samples': split_idx,
+                            'valid_targets': valid_targets,
+                            'selected_features': top_features,
+                            'feature_importance': feature_importance_dict
+                        })
+                    else:
+                        print("   ⚠️ 无有效目标或重要性计算失败，保持当前特征")
+                        feature_importance_dict = {}
             else:
                 print("   ⚠️ 没有有效的数值特征")
         else:
@@ -654,10 +796,183 @@ class FeatureEngineer:
         print(f"   📊 原始特征数: {results['original_features']}")
         print(f"   ✅ 最终特征数: {len(final_features)}")
         print(f"   📉 特征削减率: {results['reduction_ratio']:.1%}")
+        
+        # 显示管道步骤统计
+        if results['pipeline_steps']:
+            auto_clean_step = next((s for s in results['pipeline_steps'] if s['step'] == 'auto_feature_cleaning'), None)
+            if auto_clean_step and auto_clean_step['removed_features']:
+                print(f"   🧽 自动特征清洗: 移除 {len(auto_clean_step['removed_features'])} 个")
+        
         if final_features:
             print(f"   🏆 最终Top-10特征: {final_features[:10]}")
         
         return results
+
+    def scale_features(self, features_df: pd.DataFrame, 
+                       scaler_type: str = 'robust',
+                       train_ratio: float = 0.8,
+                       save_path: str = 'scaler.pkl',
+                       exclude_cols: Optional[List[str]] = None) -> Dict:
+        """
+        对特征做尺度标准化（时间序列防泄漏：仅用训练段 fit，其余段 transform）
+        
+        Parameters
+        ----------
+        features_df : pd.DataFrame
+            已完成特征选择的特征数据，包含 'close'
+        scaler_type : str, default 'robust'
+            缩放方式: 'robust' | 'standard' | 'minmax'
+        train_ratio : float, default 0.8
+            训练集比例（时间切分）
+        save_path : str
+            持久化缩放器路径（pickle）
+        exclude_cols : list
+            不参与缩放的列（默认: ['close'] + datetime）
+        
+        Returns
+        -------
+        dict:
+            {
+              'scaled_df': 缩放后的数据（保持原索引与列顺序）
+              'scaler': 已拟合缩放器对象
+              'train_index': 训练区间索引
+              'valid_index': 验证/未来区间索引
+              'feature_cols': 实际缩放的特征列
+              'scaler_path': 保存路径
+            }
+        """
+        print("📏 开始特征标准化...")
+        
+        df = features_df.copy()
+        if df.empty:
+            raise ValueError("scale_features: 输入的特征数据为空")
+        
+        # 识别排除列
+        datetime_col = 'datetime' if 'datetime' in df.columns else None
+        if exclude_cols is None:
+            exclude_cols = ['close']
+            if datetime_col:
+                exclude_cols.append(datetime_col)
+        
+        feature_cols = [c for c in df.columns if c not in exclude_cols]
+        if not feature_cols:
+            raise ValueError("scale_features: 没有可缩放的特征列")
+        
+        # 时间切分（保持与特征选择一致的逻辑）
+        n_samples = len(df)
+        split_idx = int(n_samples * train_ratio)
+        if split_idx < 30:
+            raise ValueError(f"scale_features: 训练集样本过少({split_idx})，无法拟合缩放器")
+        
+        train_index = df.index[:split_idx]
+        valid_index = df.index[split_idx:]
+        
+        print(f"   📊 时间切分: 训练集 {split_idx}/{n_samples} ({train_ratio:.1%})")
+        print(f"   📅 训练段: {train_index.min().date()} ~ {train_index.max().date()}")
+        if len(valid_index) > 0:
+            print(f"   📅 验证段: {valid_index.min().date()} ~ {valid_index.max().date()}")
+        
+        train_X = df.loc[train_index, feature_cols]
+        valid_X = df.loc[valid_index, feature_cols] if len(valid_index) > 0 else None
+        
+        # 选择缩放器
+        if scaler_type == 'robust':
+            scaler = RobustScaler()
+            print(f"   🔧 使用 RobustScaler (中位数-IQR标准化，适合金融数据)")
+        elif scaler_type == 'standard':
+            scaler = StandardScaler()
+            print(f"   🔧 使用 StandardScaler (均值-标准差标准化)")
+        elif scaler_type == 'minmax':
+            scaler = MinMaxScaler()
+            print(f"   🔧 使用 MinMaxScaler (最小-最大值标准化)")
+        else:
+            raise ValueError("scaler_type 必须是 'robust' | 'standard' | 'minmax'")
+        
+        # 拟合 + 变换（只在训练集上拟合）
+        print(f"   🎯 在训练集上拟合缩放器...")
+        scaler.fit(train_X.fillna(0))  # 处理可能的缺失值
+        scaled_train = scaler.transform(train_X.fillna(0))
+        
+        if valid_X is not None:
+            print(f"   🔄 对验证集进行变换...")
+            scaled_valid = scaler.transform(valid_X.fillna(0))
+        
+        # 回填结果（保持原有的列结构和索引）
+        scaled_df = df.copy()
+        scaled_df.loc[train_index, feature_cols] = scaled_train
+        if valid_X is not None:
+            scaled_df.loc[valid_index, feature_cols] = scaled_valid
+        
+        # 持久化缩放器和元数据
+        try:
+            import pickle
+            import json
+            from datetime import datetime
+            
+            # 保存缩放器和元数据
+            scaler_data = {
+                'scaler': scaler,
+                'feature_cols': feature_cols,
+                'scaler_type': scaler_type,
+                'train_ratio': train_ratio,
+                'train_samples': split_idx,
+                'total_samples': n_samples,
+                'train_range': (str(train_index.min().date()), str(train_index.max().date())),
+                'valid_range': (str(valid_index.min().date()), str(valid_index.max().date())) if len(valid_index) > 0 else None,
+                'fit_timestamp': datetime.now().isoformat(),
+                'feature_count': len(feature_cols)
+            }
+            
+            with open(save_path, 'wb') as f:
+                pickle.dump(scaler_data, f)
+            
+            # 另外保存一个可读的元数据文件
+            meta_path = save_path.replace('.pkl', '_meta.json')
+            readable_meta = {k: v for k, v in scaler_data.items() if k != 'scaler'}  # 排除不能JSON序列化的scaler对象
+            with open(meta_path, 'w', encoding='utf-8') as f:
+                json.dump(readable_meta, f, indent=2, ensure_ascii=False)
+                
+            print(f"   ✅ 缩放器已保存: {save_path}")
+            print(f"   📋 元数据已保存: {meta_path}")
+            
+        except Exception as e:
+            print(f"   ⚠️ 缩放器保存失败: {e}")
+        
+        # 计算缩放前后的统计信息
+        original_stats = train_X.describe()
+        scaled_stats = pd.DataFrame(scaled_train, columns=feature_cols).describe()
+        
+        print(f"\n📊 缩放效果统计:")
+        print(f"   🔢 缩放特征数: {len(feature_cols)}")
+        print(f"   📈 原始数据范围: 均值 [{original_stats.loc['mean'].min():.4f}, {original_stats.loc['mean'].max():.4f}]")
+        print(f"   📉 缩放后范围: 均值 [{scaled_stats.loc['mean'].min():.4f}, {scaled_stats.loc['mean'].max():.4f}]")
+        print(f"   📊 原始标准差: [{original_stats.loc['std'].min():.4f}, {original_stats.loc['std'].max():.4f}]")
+        print(f"   📊 缩放后标准差: [{scaled_stats.loc['std'].min():.4f}, {scaled_stats.loc['std'].max():.4f}]")
+        
+        # 显示缩放最剧烈的特征
+        original_ranges = original_stats.loc['max'] - original_stats.loc['min']
+        scaled_ranges = scaled_stats.loc['max'] - scaled_stats.loc['min']
+        scale_ratios = original_ranges / (scaled_ranges + 1e-8)
+        top_scaled_features = scale_ratios.nlargest(5)
+        
+        print(f"\n🎯 缩放效果最明显的特征:")
+        for i, (feature, ratio) in enumerate(top_scaled_features.items(), 1):
+            orig_range = original_ranges[feature]
+            scaled_range = scaled_ranges[feature]
+            print(f"   {i}. {feature}: {orig_range:.4f} → {scaled_range:.4f} (压缩 {ratio:.1f}x)")
+        
+        return {
+            'scaled_df': scaled_df,
+            'scaler': scaler,
+            'train_index': train_index,
+            'valid_index': valid_index,
+            'feature_cols': feature_cols,
+            'scaler_path': save_path,
+            'meta_path': meta_path,
+            'scaler_type': scaler_type,
+            'train_samples': split_idx,
+            'feature_count': len(feature_cols)
+        }
 
     def analyze_features(self, features_df: pd.DataFrame, plot: bool = True) -> Dict:
         """
@@ -968,8 +1283,16 @@ if __name__ == "__main__":
         
         # 生成特征
         print("\n🏭 生成技术特征...")
-        features_df = engineer.prepare_features(data, use_auto_features=True)
-        print(f"✅ 成功生成 {features_df.shape[1]-1} 个特征")
+        features_df = engineer.prepare_features(
+            data, 
+            use_auto_features=True,  # 启用自动特征生成
+            window_size=20,
+            max_auto_features=30  # 限制自动特征数量
+        )
+        total_features = features_df.shape[1] - 1
+        manual_count = len([col for col in features_df.columns if not col.startswith('auto_') and col != 'close'])
+        auto_count = len([col for col in features_df.columns if col.startswith('auto_')])
+        print(f"✅ 成功生成 {total_features} 个特征 (手工:{manual_count} + 自动:{auto_count})")
         
         # 特征选择
         print("\n🎯 执行特征选择...")
@@ -977,27 +1300,46 @@ if __name__ == "__main__":
             features_df,
             final_k=20,
             variance_threshold=0.01,
-            correlation_threshold=0.9
+            correlation_threshold=0.9,
+            train_ratio=0.8  # 只用80%的历史数据计算特征重要性，防止数据泄漏
         )
         
         final_features = selection_results['final_features']
         print(f"✅ 最终选择 {len(final_features)} 个重要特征")
         
-        # 特征分析
-        print("\n📊 分析特征质量...")
-        analysis = engineer.analyze_features(selection_results['final_features_df'], plot=True)
+        # 特征标准化（新增步骤）
+        print("\n� 执行特征标准化...")
+        scale_results = engineer.scale_features(
+            selection_results['final_features_df'],
+            scaler_type='robust',  # 金融数据推荐使用RobustScaler
+            train_ratio=0.8,       # 与特征选择保持一致的时间切分
+            save_path='feature_scaler.pkl'
+        )
+        scaled_df = scale_results['scaled_df']
+        print(f"✅ 特征标准化完成，缩放器已保存到 {scale_results['scaler_path']}")
+        
+        # 特征分析（使用标准化后的数据）
+        print("\n📊 分析标准化后的特征质量...")
+        analysis = engineer.analyze_features(scaled_df, plot=True)
         
         print(f"\n📋 处理完成！")
         print(f"   🔢 原始数据: {len(data)} 天")
         print(f"   🏭 生成特征: {features_df.shape[1]-1} 个")
         print(f"   🎯 最终特征: {len(final_features)} 个")
-        print(f"   📊 特征质量: {analysis['total_features'] - len(analysis['missing_values'])} 个无缺失值")
+        print(f"   � 标准化特征: {scale_results['feature_count']} 个")
+        print(f"   �📊 特征质量: {analysis['total_features'] - len(analysis['missing_values'])} 个无缺失值")
         
         print("\n💡 使用说明:")
         print("   1. engineer.load_stock_data() - 加载真实股票数据")
         print("   2. engineer.prepare_features() - 生成技术特征")
         print("   3. engineer.select_features() - 执行特征选择")
-        print("   4. engineer.analyze_features() - 分析特征质量")
+        print("   4. engineer.scale_features() - 特征标准化（防泄漏）")
+        print("   5. engineer.analyze_features() - 分析特征质量")
+        
+        print(f"\n💾 输出文件:")
+        print(f"   📦 特征缩放器: {scale_results['scaler_path']}")
+        print(f"   📋 缩放元数据: {scale_results['meta_path']}")
+        print("   📊 可用 scaled_df.to_csv('scaled_features.csv') 保存标准化特征")
         
     except Exception as e:
         print(f"❌ 运行出错: {e}")
