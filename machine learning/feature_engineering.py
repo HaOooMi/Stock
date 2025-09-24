@@ -17,6 +17,9 @@ import pandas as pd
 import numpy as np
 import sys
 import os
+import pickle
+import json
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
@@ -53,11 +56,7 @@ except ImportError:
     HAS_XGBOOST = False
     print("⚠️ xgboost 未安装，将使用RandomForest进行特征重要性评估")
 
-try:
-    import matplotlib.pyplot as plt
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
+
 
 
 class FeatureEngineer:
@@ -905,10 +904,6 @@ class FeatureEngineer:
         
         # 持久化缩放器和元数据
         try:
-            import pickle
-            import json
-            from datetime import datetime
-            
             # 保存缩放器和元数据
             scaler_data = {
                 'scaler': scaler,
@@ -974,7 +969,7 @@ class FeatureEngineer:
             'feature_count': len(feature_cols)
         }
 
-    def analyze_features(self, features_df: pd.DataFrame, plot: bool = True) -> Dict:
+    def analyze_features(self, features_df: pd.DataFrame) -> Dict:
         """
         分析特征分布和质量（应在特征选择之后使用）
         
@@ -982,8 +977,6 @@ class FeatureEngineer:
         -----------
         features_df : pd.DataFrame
             特征数据（已经过特征选择的数据）
-        plot : bool, default=True
-            是否绘制分析图表
             
         Returns:
         --------
@@ -1061,13 +1054,7 @@ class FeatureEngineer:
             for col, info in list(analysis['extreme_values'].items())[:5]:  # 显示前5个
                 print(f"      {col}: {info['count']} ({info['percentage']:.1f}%)")
         
-        # 绘图分析
-        if plot and len(numeric_features.columns) > 0:
-            try:
-                self._plot_feature_analysis(numeric_features)
-            except Exception as e:
-                print(f"⚠️ 绘图功能不可用: {str(e)}")
-                print("推荐使用 features_df.to_csv('特征数据.csv') 保存数据后在Excel中查看")
+
         
         # 添加更多统计信息
         print(f"\n📊 整体数据质量评估:")
@@ -1139,7 +1126,28 @@ class FeatureEngineer:
             print(f"  最大值范围: {overall_stats['max'].min():.4f} ~ {overall_stats['max'].max():.4f}")
             
             # 特征分类展示
-            self._categorize_features(feature_cols)
+            print("\n🏷️  特征分类:")
+            
+            categories = {
+                '收益率特征': [col for col in feature_cols if 'return' in col],
+                '动量特征': [col for col in feature_cols if 'momentum' in col],
+                '滚动统计': [col for col in feature_cols if 'rolling' in col],
+                '波动率特征': [col for col in feature_cols if any(x in col for x in ['volatility', 'atr', 'skewness', 'kurtosis'])],
+                '成交量特征': [col for col in feature_cols if 'volume' in col],
+                '价格特征': [col for col in feature_cols if any(x in col for x in ['price', 'high', 'low', 'open', 'ratio'])],
+                '技术指标': [col for col in feature_cols if any(x in col for x in ['rsi', 'bb', 'macd'])],
+                '自动特征': [col for col in feature_cols if col.startswith('auto_')],
+                '其他特征': [col for col in feature_cols if not any([
+                    'return' in col, 'momentum' in col, 'rolling' in col,
+                    any(x in col for x in ['volatility', 'atr', 'skewness', 'kurtosis']),
+                    'volume' in col, any(x in col for x in ['price', 'high', 'low', 'open', 'ratio']),
+                    any(x in col for x in ['rsi', 'bb', 'macd']), col.startswith('auto_')
+                ])]
+            }
+            
+            for category, features in categories.items():
+                if features:
+                    print(f"  📌 {category} ({len(features)}个): {', '.join(features[:5])}{'...' if len(features) > 5 else ''}")
         
         # 数据样本预览（前5行，重要列）
         print("\n📄 数据样本预览（前5行）:")
@@ -1161,102 +1169,7 @@ class FeatureEngineer:
             
         print("=" * 50)
     
-    def _categorize_features(self, feature_cols: list):
-        """
-        将特征按类型分类展示
-        """
-        print("\n🏷️  特征分类:")
-        
-        categories = {
-            '收益率特征': [col for col in feature_cols if 'return' in col],
-            '动量特征': [col for col in feature_cols if 'momentum' in col],
-            '滚动统计': [col for col in feature_cols if 'rolling' in col],
-            '波动率特征': [col for col in feature_cols if any(x in col for x in ['volatility', 'atr', 'skewness', 'kurtosis'])],
-            '成交量特征': [col for col in feature_cols if 'volume' in col],
-            '价格特征': [col for col in feature_cols if any(x in col for x in ['price', 'high', 'low', 'open', 'ratio'])],
-            '技术指标': [col for col in feature_cols if any(x in col for x in ['rsi', 'bb', 'macd'])],
-            '自动特征': [col for col in feature_cols if col.startswith('auto_')],
-            '其他特征': [col for col in feature_cols if not any([
-                'return' in col, 'momentum' in col, 'rolling' in col,
-                any(x in col for x in ['volatility', 'atr', 'skewness', 'kurtosis']),
-                'volume' in col, any(x in col for x in ['price', 'high', 'low', 'open', 'ratio']),
-                any(x in col for x in ['rsi', 'bb', 'macd']), col.startswith('auto_')
-            ])]
-        }
-        
-        for category, features in categories.items():
-            if features:
-                print(f"  📌 {category} ({len(features)}个): {', '.join(features[:5])}{'...' if len(features) > 5 else ''}")
-    
-    def _plot_feature_analysis(self, features_df: pd.DataFrame, max_plots: int = 12):
-        """绘制特征分析图表"""
-        if not HAS_MATPLOTLIB:
-            print("⚠️ matplotlib 未安装，无法显示图表")
-            print("💾 建议使用: pip install matplotlib")
-            return
-            
-        try:
-            import matplotlib.pyplot as plt
-            
-            # 设置中文显示
-            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-            plt.rcParams['axes.unicode_minus'] = False
-            
-            n_features = min(len(features_df.columns), max_plots)
-            if n_features == 0:
-                print("⚠️ 没有数值特征可以绘制")
-                return
-                
-            # 计算子图布局
-            rows = (n_features + 3) // 4  # 每行4个子图
-            cols = min(4, n_features)
-            
-            fig, axes = plt.subplots(rows, cols, figsize=(16, 4 * rows))
-            if rows == 1 and cols == 1:
-                axes = [axes]
-            elif rows == 1:
-                axes = axes
-            else:
-                axes = axes.ravel()
-            
-            print(f"📈 正在生成 {n_features} 个特征的分布图...")
-            
-            for i, col in enumerate(features_df.columns[:n_features]):
-                try:
-                    # 计算有效数据
-                    valid_data = features_df[col].dropna()
-                    if len(valid_data) == 0:
-                        axes[i].text(0.5, 0.5, f'{col}\n无有效数据', 
-                                   ha='center', va='center', transform=axes[i].transAxes)
-                        continue
-                    
-                    # 绘制直方图
-                    n_bins = min(30, max(10, len(valid_data) // 10))
-                    axes[i].hist(valid_data, bins=n_bins, alpha=0.7, edgecolor='black', color='skyblue')
-                    axes[i].set_title(f'{col}\n均值:{valid_data.mean():.3f}, 标准差:{valid_data.std():.3f}', fontsize=10)
-                    axes[i].tick_params(labelsize=8)
-                    axes[i].grid(True, alpha=0.3)
-                    
-                except Exception as e:
-                    axes[i].text(0.5, 0.5, f'{col}\n绘图失败: {str(e)[:20]}', 
-                               ha='center', va='center', transform=axes[i].transAxes)
-            
-            # 隐藏多余的子图
-            for i in range(n_features, len(axes)):
-                axes[i].set_visible(False)
-            
-            plt.tight_layout()
-            plt.suptitle(f'特征分布分析 (Top-{n_features})', fontsize=14, y=0.98)
-            
-            # 显示图表
-            print("📈 正在显示特征分布图...")
-            plt.show()
-            
-        except ImportError:
-            print("⚠️ matplotlib 导入失败")
-        except Exception as e:
-            print(f"⚠️ 绘图过程中出现错误: {str(e)}")
-            print("💾 建议保存数据到CSV文件后在其他工具中查看")
+
 
 
 if __name__ == "__main__":
@@ -1320,7 +1233,7 @@ if __name__ == "__main__":
         
         # 特征分析（使用标准化后的数据）
         print("\n📊 分析标准化后的特征质量...")
-        analysis = engineer.analyze_features(scaled_df, plot=True)
+        analysis = engineer.analyze_features(scaled_df)
         
         print(f"\n📋 处理完成！")
         print(f"   🔢 原始数据: {len(data)} 天")
