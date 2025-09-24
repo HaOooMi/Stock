@@ -810,7 +810,7 @@ class FeatureEngineer:
     def scale_features(self, features_df: pd.DataFrame, 
                        scaler_type: str = 'robust',
                        train_ratio: float = 0.8,
-                       save_path: str = 'scaler.pkl',
+                       save_path: str = 'machine learning/scaler.pkl',
                        exclude_cols: Optional[List[str]] = None) -> Dict:
         """
         对特征做尺度标准化（时间序列防泄漏：仅用训练段 fit，其余段 transform）
@@ -904,6 +904,12 @@ class FeatureEngineer:
         
         # 持久化缩放器和元数据
         try:
+            # 确保保存目录存在
+            save_dir = os.path.dirname(save_path)
+            if save_dir and not os.path.exists(save_dir):
+                os.makedirs(save_dir, exist_ok=True)
+                print(f"   📁 创建目录: {save_dir}")
+            
             # 保存缩放器和元数据
             scaler_data = {
                 'scaler': scaler,
@@ -1226,7 +1232,7 @@ if __name__ == "__main__":
             selection_results['final_features_df'],
             scaler_type='robust',  # 金融数据推荐使用RobustScaler
             train_ratio=0.8,       # 与特征选择保持一致的时间切分
-            save_path='feature_scaler.pkl'
+            save_path='machine learning/feature_scaler.pkl'
         )
         scaled_df = scale_results['scaled_df']
         print(f"✅ 特征标准化完成，缩放器已保存到 {scale_results['scaler_path']}")
