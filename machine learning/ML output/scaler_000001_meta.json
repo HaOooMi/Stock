@@ -2,32 +2,32 @@
   "feature_cols": [
     "rolling_std_30d",
     "atr_14",
-    "volume_ma_20",
     "rolling_std_20d",
-    "bb_upper",
-    "rolling_median_30d",
     "price_position_20d",
     "macd_hist",
     "skewness_20d",
-    "rolling_std_5d",
+    "auto_close__maximum",
     "kurtosis_20d",
-    "volume_ma_5",
     "rolling_std_10d",
+    "auto_volume__maximum",
+    "rolling_std_5d",
+    "volume_ma_5",
+    "volume_roc_3d",
     "volume_roc_10d",
-    "macd"
+    "auto_close__minimum"
   ],
   "scaler_type": "robust",
   "train_ratio": 0.8,
-  "train_samples": 360,
-  "total_samples": 451,
+  "train_samples": 344,
+  "total_samples": 431,
   "train_range": [
-    "2023-02-24",
-    "2024-08-15"
+    "2023-03-24",
+    "2024-08-21"
   ],
   "valid_range": [
-    "2024-08-16",
+    "2024-08-22",
     "2024-12-31"
   ],
-  "fit_timestamp": "2025-09-25T10:56:31.517448",
+  "fit_timestamp": "2025-09-26T09:23:42.140982",
   "feature_count": 15
 }

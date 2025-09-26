@@ -57,7 +57,7 @@ def create_complete_dataset(symbol: str, start_date: str, end_date: str,
     tuple: (完整数据集DataFrame, 特征工程结果, 目标工程器, 保存路径)
     """
     
-    print("🚀 开始完整数据管道...")
+    # 开始数据管道
     print("=" * 60)
     
     # ===== 阶段1: 特征工程 =====
@@ -84,7 +84,7 @@ def create_complete_dataset(symbol: str, start_date: str, end_date: str,
     )
     
     # 特征选择
-    print("🎯 执行特征选择...")
+    # 执行特征选择
     selection_results = feature_engineer.select_features(
         features_df,
         final_k=final_k_features,
@@ -97,7 +97,7 @@ def create_complete_dataset(symbol: str, start_date: str, end_date: str,
     
     # 特征标准化（可选）
     if include_scaling:
-        print("📏 执行特征标准化...")
+        # 执行特征标准化
         scale_results = feature_engineer.scale_features(
             final_features_df,
             scaler_type='robust',
@@ -116,7 +116,7 @@ def create_complete_dataset(symbol: str, start_date: str, end_date: str,
     analysis_results = feature_engineer.analyze_features(scaled_features_df)
     
     # ===== 阶段2: 目标工程 =====
-    print("\n🎯 阶段2: 目标工程")  
+    # 阶段2: 目标工程  
     print("-" * 30)
     
     # 初始化目标工程器
@@ -145,12 +145,12 @@ def create_complete_dataset(symbol: str, start_date: str, end_date: str,
     
     # ===== 最终总结 =====
     print("\n" + "=" * 60)
-    print("🎉 完整数据管道执行完成！")
+    print("Data pipeline completed")
     print(f"   📊 原始数据: {len(raw_data)} 行")
     print(f"   🏭 生成特征: {len(features_df.columns)-1} 个")
-    print(f"   🎯 选择特征: {len(selection_results['final_features'])} 个")
-    print(f"   📏 标准化: {'✅' if include_scaling else '❌'}")
-    print(f"   🎯 目标窗口: {target_periods} 天")
+    print(f"   Features selected: {len(selection_results['final_features'])}")
+    print(f"   Scaling: {'Yes' if include_scaling else 'No'}")
+    print(f"   Target window: {target_periods} days")
     print(f"   💾 保存路径: {save_path}")
     
     # 数据可用性检查
@@ -169,7 +169,7 @@ def main():
     """
     主函数 - 执行完整的数据管道
     """
-    print("🚀 股票机器学习数据管道")
+    print("Stock ML Data Pipeline")
     print("=" * 60)
     
     try:
@@ -184,7 +184,7 @@ def main():
             'include_scaling': True       # 是否标准化
         }
         
-        print("📋 执行配置:")
+        print("Configuration:")
         for key, value in config.items():
             print(f"   {key}: {value}")
         print()

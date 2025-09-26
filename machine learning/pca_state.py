@@ -707,7 +707,7 @@ def main():
             'symbol': '000001',  # 平安银行
             'start_date': '2023-01-01',
             'end_date': '2024-12-31',
-            'use_auto_features': False,  # 是否使用自动特征生成
+            'use_auto_features': True,  # 是否使用自动特征生成
             'final_k_features': 15,      # 最终特征数量
             'target_periods': [1, 5, 10], # 目标时间窗口
             'pca_components': 0.9,       # PCA解释方差比例
