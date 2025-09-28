@@ -134,11 +134,7 @@ class ClusterEvaluator:
         
         kmeans.fit(states_train)
         
-        # 计算聚类质量指标
-        silhouette_avg = silhouette_score(states_train, kmeans.labels_)
-        calinski_score = calinski_harabasz_score(states_train, kmeans.labels_)
-        
-        print(f"K={k}: Silhouette={silhouette_avg:.3f}, Calinski-Harabasz={calinski_score:.1f}")
+        print(f"K={k} clustering completed")
         
         return kmeans
 
@@ -269,22 +265,32 @@ class ClusterEvaluator:
         return validation
     
 
-    def generate_summary_report(self, validations: Dict, global_std: float) -> Dict:
+
+        
+        # 2. 为每个k值生成详细的特征报告
+        for k in self.k_values:
+            self.generate_detailed_cluster_report(k, all_train_results, all_test_results, 
+                                                all_validations[k], states_train)
+    
+    def generate_comprehensive_report(self, all_train_results: List, all_test_results: List, 
+                                    validations: Dict, global_std: float):
         """
-        生成总结报告
+        生成综合聚类分析报告 - 合并所有报告生成功能
         
         Parameters:
         -----------
+        all_train_results : List
+            所有k值的训练结果
+        all_test_results : List
+            所有k值的测试结果
         validations : dict
             所有k值的验证结果
         global_std : float
             全局标准差
-            
-        Returns:
-        --------
-        dict
-            总结报告
         """
+        print("\n📊 Generating comprehensive clustering reports...")
+        
+        # === 1. 总结报告数据 ===
         summary = {
             'global_std': global_std,
             'threshold': global_std * 0.4,
@@ -320,6 +326,176 @@ class ClusterEvaluator:
         summary['train_success_rate'] = summary['passed_train_validation'] / summary['total_k_values']
         summary['test_success_rate'] = summary['passed_test_validation'] / summary['total_k_values']
         summary['overall_success_rate'] = summary['passed_both_validation'] / summary['total_k_values']
+        
+        # === 2. 生成主报告文件 ===
+        main_report_lines = []
+        main_report_lines.append("K-Means聚类分析综合报告")
+        main_report_lines.append("=" * 60)
+        main_report_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        main_report_lines.append(f"全局收益标准差: {global_std:.6f}")
+        main_report_lines.append(f"训练显著性阈值: {global_std * 0.4:.6f}")
+        main_report_lines.append("")
+        
+        # 验证统计
+        main_report_lines.append("� 验证统计:")
+        main_report_lines.append(f"  测试k值总数: {summary['total_k_values']}")
+        main_report_lines.append(f"  训练显著性通过: {summary['passed_train_validation']}/{summary['total_k_values']} ({summary['train_success_rate']:.1%})")
+        main_report_lines.append(f"  测试前50%通过: {summary['passed_test_validation']}/{summary['total_k_values']} ({summary['test_success_rate']:.1%})")
+        main_report_lines.append(f"  双重验证通过: {summary['passed_both_validation']}/{summary['total_k_values']} ({summary['overall_success_rate']:.1%})")
+        
+        if summary['best_k']:
+            main_report_lines.append(f"\n🏆 最佳k值: {summary['best_k']}")
+            best_perf = summary['best_performance']
+            main_report_lines.append(f"  训练差异: {best_perf['train_difference']:+.6f}")
+            main_report_lines.append(f"  测试最佳排名: {best_perf['test_best_cluster_rank']}")
+        
+        main_report_lines.append("\n" + "=" * 60)
+        
+        # === 3. 为每个k值生成详细报告 ===
+        all_summary_data = []
+        
+        for k in self.k_values:
+            validation = validations[k]
+            
+            # 获取该k值的结果
+            train_k = pd.concat([df for df in all_train_results if df['k_value'].iloc[0] == k], ignore_index=True)
+            test_k = pd.concat([df for df in all_test_results if df['k_value'].iloc[0] == k], ignore_index=True)
+            kmeans = self.cluster_models[k]
+            
+            # 添加到主报告
+            main_report_lines.append(f"\n🔍 K={k} 详细分析 {'✅' if validation['train_significant'] and validation['test_top_50_percent'] else '❌'}")
+            main_report_lines.append("-" * 40)
+            main_report_lines.append(f"验证: 训练显著性={validation['train_significant']}, 测试前50%={validation['test_top_50_percent']}")
+            
+            # 只在有质量指标时显示
+            if 'silhouette_score' in validation and 'calinski_score' in validation:
+                main_report_lines.append(f"质量分数: Silhouette={validation['silhouette_score']:.4f}, Calinski-Harabasz={validation['calinski_score']:.2f}")
+            else:
+                main_report_lines.append("质量分数: 未计算")
+            
+            # 详细聚类信息
+            detailed_csv_data = []
+            
+            for cluster_id in range(k):
+                train_row = train_k[train_k['cluster_id'] == cluster_id]
+                test_row = test_k[test_k['cluster_id'] == cluster_id]
+                
+                if len(train_row) > 0 and len(test_row) > 0:
+                    train_data = train_row.iloc[0]
+                    test_data = test_row.iloc[0]
+                    cluster_center = kmeans.cluster_centers_[cluster_id]
+                    
+                    # 添加到主报告
+                    main_report_lines.append(f"  聚类{cluster_id}: 训练收益={train_data['mean_return']:+.6f}(排名{train_data['rank']}), 测试收益={test_data['mean_return']:+.6f}(排名{test_data['rank']})")
+                    
+                    # 准备CSV数据
+                    row_data = {
+                        'k_value': k,
+                        'cluster_id': cluster_id,
+                        'train_mean_return': train_data['mean_return'],
+                        'test_mean_return': test_data['mean_return'],
+                        'train_rank': train_data['rank'],
+                        'test_rank': test_data['rank'],
+                        'train_samples': train_data['count'],
+                        'test_samples': test_data['count'],
+                        'train_positive_ratio': train_data['positive_ratio'],
+                        'test_positive_ratio': test_data['positive_ratio']
+                    }
+                    
+                    # 添加聚类中心特征
+                    for i, center_val in enumerate(cluster_center):
+                        row_data[f'center_PC{i+1}'] = center_val
+                    
+                    # 添加训练集特征统计
+                    feature_cols = [col for col in train_data.index if col.startswith('PC')]
+                    for col in feature_cols:
+                        row_data[f'train_{col}'] = train_data[col]
+                    
+                    detailed_csv_data.append(row_data)
+            
+            # 保存单独的k值详细CSV
+            if detailed_csv_data:
+                detailed_csv = pd.DataFrame(detailed_csv_data)
+                csv_file = os.path.join(self.reports_dir, f"cluster_features_k{k}.csv")
+                detailed_csv.to_csv(csv_file, index=False)
+                
+                # 添加到汇总数据
+                all_summary_data.extend(detailed_csv_data)
+        
+        # === 4. 保存主报告文件 ===
+        main_report_file = os.path.join(self.reports_dir, "clustering_analysis_report.txt")
+        with open(main_report_file, 'w', encoding='utf-8') as f:
+            f.write("\n".join(main_report_lines))
+        
+        # === 5. 生成聚类比较表 ===
+        comparison_data = []
+        for k in self.k_values:
+            train_k = pd.concat([df for df in all_train_results if df['k_value'].iloc[0] == k], ignore_index=True)
+            test_k = pd.concat([df for df in all_test_results if df['k_value'].iloc[0] == k], ignore_index=True)
+            validation = validations[k]
+            
+            for cluster_id in range(k):
+                train_row = train_k[train_k['cluster_id'] == cluster_id]
+                test_row = test_k[test_k['cluster_id'] == cluster_id]
+                
+                if len(train_row) > 0 and len(test_row) > 0:
+                    train_data = train_row.iloc[0]
+                    test_data = test_row.iloc[0]
+                    
+                    comparison_data.append({
+                        'k_value': k,
+                        'cluster_id': cluster_id,
+                        'train_samples': train_data['count'],
+                        'test_samples': test_data['count'],
+                        'train_mean_return': train_data['mean_return'],
+                        'test_mean_return': test_data['mean_return'],
+                        'train_rank': train_data['rank'],
+                        'test_rank': test_data['rank'],
+                        'overall_return': train_data['mean_return'] + test_data['mean_return'],
+                        'validation_passed': validation['train_significant'] and validation['test_top_50_percent'],
+                        'is_best_in_k': train_data['rank'] == 1,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    })
+        
+        # 保存聚类比较表
+        if comparison_data:
+            comparison_df = pd.DataFrame(comparison_data)
+            comparison_df = comparison_df.sort_values(['validation_passed', 'overall_return'], ascending=[False, False])
+            comparison_df['global_rank'] = range(1, len(comparison_df) + 1)
+            comparison_csv_file = os.path.join(self.reports_dir, "cluster_comparison.csv")
+            comparison_df.to_csv(comparison_csv_file, index=False)
+        
+        # === 6. 保存汇总CSV文件 ===
+        if all_summary_data:
+            all_summary_csv = pd.DataFrame(all_summary_data)
+            summary_csv_file = os.path.join(self.reports_dir, "clustering_summary_all_k.csv")
+            all_summary_csv.to_csv(summary_csv_file, index=False)
+        
+        # === 7. 保存验证结果CSV ===
+        validation_data = []
+        for k, validation in validations.items():
+            validation_data.append({
+                'k_value': k,
+                'silhouette_score': validation['silhouette_score'],
+                'calinski_score': validation['calinski_score'],
+                'train_difference': validation['train_difference'],
+                'train_significant': validation['train_significant'],
+                'test_best_cluster_rank': validation['test_best_cluster_rank'],
+                'test_top_50_percent': validation['test_top_50_percent'],
+                'overall_valid': validation['train_significant'] and validation['test_top_50_percent']
+            })
+        
+        validation_csv = pd.DataFrame(validation_data)
+        validation_csv_file = os.path.join(self.reports_dir, "clustering_validation_results.csv")
+        validation_csv.to_csv(validation_csv_file, index=False)
+        
+        # === 8. 输出生成的文件列表 ===
+        print(f"📄 主报告: {main_report_file}")
+        print(f"🏆 聚类比较: {comparison_csv_file}")
+        print(f"📊 汇总数据: {summary_csv_file}")
+        print(f"✅ 验证结果: {validation_csv_file}")
+        print(f"📁 详细特征: {len(self.k_values)}个k值的单独CSV文件")
+        print(f"\n报告生成完成！所有文件保存在: {self.reports_dir}")
         
         return summary
 
@@ -384,6 +560,13 @@ class ClusterEvaluator:
                 train_results, test_results, global_std
             )
             validation['k_value'] = k
+            
+            # 添加聚类质量指标
+            silhouette_avg = silhouette_score(states_train, kmeans.labels_)
+            calinski_score_val = calinski_harabasz_score(states_train, kmeans.labels_)
+            validation['silhouette_score'] = silhouette_avg
+            validation['calinski_score'] = calinski_score_val
+            
             all_validations[k] = validation
             
             print(f"Training: Best={train_results.iloc[0]['mean_return']:.4f}, "
@@ -395,80 +578,15 @@ class ClusterEvaluator:
         train_combined = pd.concat(all_train_results, ignore_index=True)
         test_combined = pd.concat(all_test_results, ignore_index=True)
         
-        # 智能合并：将同一k值和同一cluster_id的train和test结果合并为一行
-        merged_results = []
-        
-        for k in self.k_values:
-            train_k = train_combined[train_combined['k_value'] == k].copy()
-            test_k = test_combined[test_combined['k_value'] == k].copy()
-            
-            # 获取验证信息
-            validation = all_validations[k]
-            
-            for cluster_id in range(k):
-                train_row = train_k[train_k['cluster_id'] == cluster_id]
-                test_row = test_k[test_k['cluster_id'] == cluster_id]
-                
-                if len(train_row) > 0 and len(test_row) > 0:
-                    train_data = train_row.iloc[0]
-                    test_data = test_row.iloc[0]
-                    
-                    # 合并为一行，包含训练和测试信息
-                    merged_row = {
-                        'k_value': k,
-                        'cluster_id': cluster_id,
-                        
-                        # 训练集信息
-                        'train_count': train_data['count'],
-                        'train_mean_return': train_data['mean_return'],
-                        'train_std_return': train_data['std_return'],
-                        'train_positive_ratio': train_data['positive_ratio'],
-                        'train_rank': train_data['rank'],
-                        
-                        # 测试集信息
-                        'test_count': test_data['count'],
-                        'test_mean_return': test_data['mean_return'],
-                        'test_std_return': test_data['std_return'],
-                        'test_positive_ratio': test_data['positive_ratio'],
-                        'test_rank': test_data['rank'],
-                        
-                        # 特征信息（使用训练集的特征作为代表）
-                        **{col: train_data[col] for col in train_data.index if col.startswith('PC')},
-                        
-                        # 验证信息
-                        'validation_passed': validation['train_significant'] and validation['test_top_50_percent'],
-                        'train_significant': validation['train_significant'],
-                        'test_top_50_percent': validation['test_top_50_percent'],
-                        'is_best_cluster': (train_data['rank'] == 1),  # 训练集最佳聚类
-                        'overall_performance': train_data['mean_return'] + test_data['mean_return'],  # 综合表现
-                        
-                        'timestamp': datetime.now()
-                    }
-                    merged_results.append(merged_row)
-        
-        # 创建最终结果DataFrame
-        final_results = pd.DataFrame(merged_results)
-        
-        # 按k值和综合表现排序
-        final_results = final_results.sort_values(['k_value', 'overall_performance'], ascending=[True, False])
-        
-        # 添加全局排名
-        final_results['global_rank'] = final_results['overall_performance'].rank(ascending=False, method='dense').astype(int)
-        
-        # 保存合并结果
-        results_file = os.path.join(self.reports_dir, "cluster_analysis_merged.csv")
-        final_results.to_csv(results_file, index=False)
-        
-        print(f"\nComplete analysis saved to: {results_file}")
-        
         # 保存聚类模型
         models_file = os.path.join(self.reports_dir, "cluster_models.pkl")
         with open(models_file, 'wb') as f:
             pickle.dump(self.cluster_models, f)
-        print(f"  Models: {models_file}")
+        print(f"💾 聚类模型已保存: {models_file}")
         
-        # 生成总结报告
-        summary = self.generate_summary_report(all_validations, global_std)
+        # 生成综合报告（合并所有报告生成功能）
+        summary = self.generate_comprehensive_report(all_train_results, all_test_results, 
+                                                   all_validations, global_std)
         
         return {
             'train_results': train_combined,
