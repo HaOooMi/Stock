@@ -9,8 +9,6 @@
 3. 特征选择和优化
 4. 特征质量分析
 
-作者: Your Name
-日期: 2024
 """
 
 import pandas as pd
