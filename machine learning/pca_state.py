@@ -288,12 +288,12 @@ class PCAStateGenerator:
         metadata = {
             'symbol': symbol,
             'created_time': datetime.now().isoformat(),
-            'original_features': pca_results['original_features'],
-            'n_components': pca_results['n_components'],
+            'original_features': int(pca_results['original_features']),
+            'n_components': int(pca_results['n_components']),
             'cumulative_variance': float(pca_results['cumulative_variance']),
             'compression_ratio': float(pca_results['compression_ratio']),
-            'train_samples': len(pca_results['states_train']),
-            'test_samples': len(pca_results['states_test']),
+            'train_samples': int(len(pca_results['states_train'])),
+            'test_samples': int(len(pca_results['states_test'])),
             'train_period': f"{pca_results['train_index'].min().date()} ~ {pca_results['train_index'].max().date()}",
             'test_period': f"{pca_results['test_index'].min().date()} ~ {pca_results['test_index'].max().date()}",
             'files': {

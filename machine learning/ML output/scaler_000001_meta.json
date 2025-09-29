@@ -1,33 +1,33 @@
 {
   "feature_cols": [
     "rolling_std_30d",
-    "atr_14",
-    "rolling_std_20d",
-    "price_position_20d",
     "macd_hist",
-    "skewness_20d",
-    "auto_close__maximum",
-    "kurtosis_20d",
     "rolling_std_10d",
-    "auto_volume__maximum",
+    "volume_roc_10d",
+    "volume_change",
+    "volume_ratio_20d",
     "rolling_std_5d",
     "volume_ma_5",
-    "volume_roc_3d",
-    "volume_roc_10d",
-    "auto_close__minimum"
+    "rsi_14",
+    "auto_volume__minimum",
+    "price_position_20d",
+    "rolling_std_20d",
+    "kurtosis_20d",
+    "auto_volume__root_mean_square",
+    "volume_ratio_5d"
   ],
   "scaler_type": "robust",
   "train_ratio": 0.8,
-  "train_samples": 344,
-  "total_samples": 431,
+  "train_samples": 70,
+  "total_samples": 88,
   "train_range": [
-    "2023-03-24",
-    "2024-08-21"
+    "2025-03-26",
+    "2025-07-08"
   ],
   "valid_range": [
-    "2024-08-22",
-    "2024-12-31"
+    "2025-07-09",
+    "2025-08-01"
   ],
-  "fit_timestamp": "2025-09-28T17:27:45.652806",
+  "fit_timestamp": "2025-09-29T15:40:58.880627",
   "feature_count": 15
 }

@@ -264,13 +264,6 @@ class ClusterEvaluator:
         
         return validation
     
-
-
-        
-        # 2. 为每个k值生成详细的特征报告
-        for k in self.k_values:
-            self.generate_detailed_cluster_report(k, all_train_results, all_test_results, 
-                                                all_validations[k], states_train)
     
     def generate_comprehensive_report(self, all_train_results: List, all_test_results: List, 
                                     validations: Dict, global_std: float):
