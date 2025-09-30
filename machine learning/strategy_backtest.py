@@ -43,8 +43,7 @@ if project_root not in sys.path:
 # 导入必要模块
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import RobustScaler
-from pca_state import PCAStateGenerator
-
+from pca_state import run_complete_feature_pipeline, run_complete_target_pipeline, PCAStateGenerator
 
 class StrategyBacktest:
     """
@@ -173,29 +172,6 @@ class StrategyBacktest:
             'selection_method': f'top_{top_n}_global_rank'
         }
 
-    def load_preprocessing_models(self, symbol: str = "000001") -> Dict:
-        """
-        数据预处理模型信息（现在由pca_state完整流程生成）
-        
-        Parameters:
-        -----------
-        symbol : str
-            股票代码
-            
-        Returns:
-        --------
-        dict
-            预处理模型信息
-        """
-        print(f"📋 数据预处理将由pca_state完整流程处理: {symbol}")
-        print("   ✅ 无需预加载模型，将在prepare_test_data中生成新的预处理流程")
-        
-        return {
-            'preprocessing_method': 'pca_state_full_pipeline',
-            'symbol': symbol,
-            'test_period': f"{self.test_start_date} ~ {self.test_end_date}"
-        }
-
     def prepare_test_data(self, symbol: str = "000001") -> pd.DataFrame:
         """
         准备测试数据（2025年1月1日至2025年8月1日）
@@ -213,10 +189,6 @@ class StrategyBacktest:
         """
         print(f"🔧 准备测试数据: {symbol} ({self.test_start_date} ~ {self.test_end_date})")
         print("   使用 pca_state 的完整数据预处理流程")
-        
-        # 导入 pca_state 的完整流程函数
-        from pca_state import run_complete_feature_pipeline, run_complete_target_pipeline, PCAStateGenerator
-        
         try:
             # 配置参数（与 pca_state.main() 相同）
             config = {
@@ -742,9 +714,6 @@ class StrategyBacktest:
             # 2. 选择训练集收益最高的聚类
             selection_results = self.select_best_clusters(cluster_results['comparison_df'], top_n)
             selected_clusters = selection_results['selected_clusters']
-            
-            # 3. 记录预处理方法
-            preprocessing_models = self.load_preprocessing_models(symbol)
             
             # 4. 准备测试数据（使用InfluxDB新数据 + pca_state完整流程）
             test_data = self.prepare_test_data(symbol)
