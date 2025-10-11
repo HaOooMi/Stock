@@ -128,7 +128,7 @@ class StrategyBacktest:
             'comparison_df': comparison_df
         }
 
-    def select_best_clusters(self, comparison_df: pd.DataFrame, top_n: int = 2) -> Dict:
+    def select_best_clusters(self, comparison_df: pd.DataFrame, top_n: int =3) -> Dict:
         """
         选择全局排名最高的聚类（按global_rank排序）
         
@@ -136,7 +136,7 @@ class StrategyBacktest:
         -----------
         comparison_df : pd.DataFrame
             聚类比较数据
-        top_n : int, default=2
+        top_n : int, default=3
             选择 top N 个聚类
             
         Returns:
@@ -146,8 +146,15 @@ class StrategyBacktest:
         """
         print(f"🎯 选择全局排名最高的 top{top_n} 聚类...")
         
+        # 只选择验证通过的聚类
+        valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
+        
+        if len(valid_clusters) == 0:
+            print("   ⚠️ 警告：没有验证通过的聚类，使用所有聚类")
+            valid_clusters = comparison_df.copy()
+        
         # 按global_rank排序（从小到大，rank越小越好），选择 top N
-        top_clusters = comparison_df.nsmallest(top_n, 'global_rank')
+        top_clusters = valid_clusters.nsmallest(top_n, 'global_rank')
         
         selected_clusters = []
         for _, row in top_clusters.iterrows():
@@ -346,6 +353,18 @@ class StrategyBacktest:
         for signal_col in signals.keys():
             combined_signal = np.maximum(combined_signal, signals[signal_col])
         
+        # 【优化】基于历史动量过滤信号（不使用未来数据）
+        # 计算过去5天的动量（收益率）
+        use_momentum_filter = True  # 是否使用动量过滤
+        if use_momentum_filter and 'close' in test_data.columns:
+            momentum_5d = test_data['close'].pct_change(periods=5).fillna(0).values
+            # 放宽条件：允许轻微下跌趋势中的信号
+            momentum_threshold = -0.02  # 允许-2%以内的下跌
+            combined_signal[(momentum_5d < momentum_threshold)] = 0
+            print(f"   🔍 动量过滤 (阈值={momentum_threshold}): 保留信号 {combined_signal.sum()}/{len(combined_signal)} ({combined_signal.mean():.2%})")
+        else:
+            print(f"   ⚠️ 未使用动量过滤")
+        
         signals['signal_combined'] = combined_signal
         
         # 添加信号到测试数据
@@ -383,9 +402,30 @@ class StrategyBacktest:
         benchmark_returns = returns
         benchmark_cumulative = np.cumprod(1 + benchmark_returns)
         
-        # 策略收益：信号为1时参与，为0时现金（收益为0）
+        # 策略收益：信号为1时买入持有，信号为0时空仓（持有现金）
+        # 这才是真正的择时策略，可以规避下跌风险
         strategy_returns = signal * returns
-        strategy_cumulative = np.cumprod(1 + strategy_returns)
+        strategy_cumulative = np.ones(len(strategy_returns))
+        
+        use_stop_loss = False  # 是否使用止损机制
+        stop_loss_threshold = -0.05  # 止损阈值（-5%）
+        
+        for i in range(1, len(strategy_returns)):
+            if signal[i] == 1:
+                # 有信号时，买入持有
+                new_return = returns[i]
+                
+                # 如果启用止损，检查是否触发止损
+                if use_stop_loss and new_return < stop_loss_threshold:
+                    # 触发止损，不参与本次交易
+                    strategy_cumulative[i] = strategy_cumulative[i-1]
+                else:
+                    # 正常参与市场
+                    strategy_cumulative[i] = strategy_cumulative[i-1] * (1 + new_return)
+            else:
+                # 无信号时，空仓，累计收益保持不变（规避风险）
+                strategy_cumulative[i] = strategy_cumulative[i-1]
+        strategy_cumulative[0] = 1 + strategy_returns[0]
         
         # 计算性能指标
         total_return_benchmark = benchmark_cumulative[-1] - 1
@@ -739,7 +779,6 @@ class StrategyBacktest:
                 'baseline_comparison': baseline_comparison,
                 'signal_data': signal_data,
                 'equity_file': equity_file,
-                'preprocessing_models': preprocessing_models,
                 'backtest_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
             
@@ -781,7 +820,7 @@ def main():
         # 运行完整回测
         results = backtest.run_complete_backtest(
             symbol="000001",  # 平安银行
-            top_n=2          # 选择top2聚类
+            top_n=3          # 选择top3聚类
         )
         
         print(f"\n✨ 回测完成！结果已保存到: {backtest.reports_dir}")
