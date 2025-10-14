@@ -117,9 +117,12 @@ class PCAStateGenerator:
 
     def fit_pca_with_time_split(self, features_df: pd.DataFrame,
                                n_components: float = 0.9,
-                               train_ratio: float = 0.8) -> Dict:
+                               train_ratio: float = 0.8,
+                               purge_periods: int = 10) -> Dict:
         """
         基于时间切分拟合PCA（防止数据泄漏）
+        
+        **重要**: 训练集尾部会purge掉purge_periods行,防止标签泄漏
         
         Parameters:
         -----------
@@ -129,6 +132,8 @@ class PCAStateGenerator:
             目标解释方差比例
         train_ratio : float, default=0.8
             训练集比例
+        purge_periods : int, default=10
+            训练集尾部purge的天数(应>=max_target_period),防止标签泄漏
             
         Returns:
         --------
@@ -138,29 +143,37 @@ class PCAStateGenerator:
         print("🔧 开始PCA训练...")
         print(f"   🎯 目标解释方差: {n_components:.1%}")
         print(f"   📊 时间切分比例: {train_ratio:.1%}")
+        print(f"   🚫 训练集尾部purge: {purge_periods}天")
         
         # 时间切分
         n_samples = len(features_df)
         split_idx = int(n_samples * train_ratio)
         
-        if split_idx < 50:
-            raise ValueError(f"训练样本过少({split_idx})，无法进行PCA训练")
+        # Purge训练集尾部(防止标签泄漏)
+        split_idx_purged = split_idx - purge_periods
         
-        train_index = features_df.index[:split_idx]
-        test_index = features_df.index[split_idx:]
+        # Purge训练集尾部(防止标签泄漏)
+        split_idx_purged = split_idx - purge_periods
         
-        print(f"   📈 训练集: {split_idx} 样本 ({train_index.min().date()} ~ {train_index.max().date()})")
+        if split_idx_purged < 50:
+            raise ValueError(f"训练样本过少({split_idx_purged}),请减小purge_periods或增加train_ratio")
+        
+        train_index = features_df.index[:split_idx_purged]
+        test_index = features_df.index[split_idx:]  # 测试集从原split_idx开始
+        
+        print(f"   📈 训练集: {split_idx_purged} 样本 ({train_index.min().date()} ~ {train_index.max().date()})")
+        print(f"   🚫 Purge gap: {purge_periods} 样本")
         print(f"   📉 测试集: {len(test_index)} 样本 ({test_index.min().date()} ~ {test_index.max().date()})")
         
         # 提取训练和测试特征
-        X_train = features_df.iloc[:split_idx].fillna(0)  # 填充可能的缺失值
+        X_train = features_df.iloc[:split_idx_purged].fillna(0)  # 使用purged的索引
         X_test = features_df.iloc[split_idx:].fillna(0)
         
         original_features = X_train.shape[1]
         print(f"   🔢 原始特征维度: {original_features}")
         
         # 初始化PCA（先用较大的成分数量）
-        pca_init = PCA(n_components=min(original_features, split_idx-1))
+        pca_init = PCA(n_components=min(original_features, split_idx_purged-1))
         pca_init.fit(X_train)
         
         # 计算累计解释方差

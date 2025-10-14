@@ -128,16 +128,21 @@ class StrategyBacktest:
             'comparison_df': comparison_df
         }
 
-    def select_best_clusters(self, comparison_df: pd.DataFrame, top_n: int =3) -> Dict:
+    def select_best_clusters(self, comparison_df: pd.DataFrame, top_n: int =3, 
+                           min_cluster_pct: float = 0.05) -> Dict:
         """
         选择全局排名最高的聚类（按global_rank排序）
+        
+        **重要**: 会过滤掉占比过小的簇,防止使用噪声/离群点簇
         
         Parameters:
         -----------
         comparison_df : pd.DataFrame
-            聚类比较数据
+            聚类比较数据,必须包含train_samples列
         top_n : int, default=3
             选择 top N 个聚类
+        min_cluster_pct : float, default=0.05
+            最小簇占比(5%),低于此值的簇会被过滤
             
         Returns:
         --------
@@ -145,6 +150,7 @@ class StrategyBacktest:
             最佳聚类信息
         """
         print(f"🎯 选择全局排名最高的 top{top_n} 聚类...")
+        print(f"   🚫 最小簇占比要求: {min_cluster_pct:.0%}")
         
         # 只选择验证通过的聚类
         valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
@@ -153,11 +159,32 @@ class StrategyBacktest:
             print("   ⚠️ 警告：没有验证通过的聚类，使用所有聚类")
             valid_clusters = comparison_df.copy()
         
+        # 【关键修复】过滤占比过小的簇
+        if 'train_samples' in valid_clusters.columns:
+            total_train_samples = valid_clusters['train_samples'].sum()
+            valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / total_train_samples
+            
+            # 过滤掉占比过小的簇
+            before_count = len(valid_clusters)
+            valid_clusters = valid_clusters[valid_clusters['cluster_pct'] >= min_cluster_pct].copy()
+            after_count = len(valid_clusters)
+            
+            if before_count > after_count:
+                print(f"   🗑️  过滤掉 {before_count - after_count} 个占比过小的簇 (<{min_cluster_pct:.0%})")
+            
+            if len(valid_clusters) == 0:
+                print("   ⚠️ 警告: 所有簇都被过滤,放宽占比要求")
+                valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
+        else:
+            print("   ⚠️ 警告: 数据中无train_samples列,跳过占比过滤")
+        
         # 按global_rank排序（从小到大，rank越小越好），选择 top N
         top_clusters = valid_clusters.nsmallest(top_n, 'global_rank')
         
         selected_clusters = []
         for _, row in top_clusters.iterrows():
+            cluster_pct = row.get('cluster_pct', None)
+            
             cluster_info = {
                 'k_value': int(row['k_value']),
                 'cluster_id': int(row['cluster_id']),
@@ -165,11 +192,15 @@ class StrategyBacktest:
                 'test_mean_return': row['test_mean_return'],
                 'train_rank': int(row['train_rank']),
                 'test_rank': int(row['test_rank']),
-                'global_rank': int(row['global_rank'])
+                'global_rank': int(row['global_rank']),
+                'train_samples': int(row['train_samples']) if 'train_samples' in row else None,
+                'cluster_pct': float(cluster_pct) if cluster_pct is not None else None
             }
             selected_clusters.append(cluster_info)
             
-            print(f"   ✅ 选中: k={cluster_info['k_value']}, cluster_id={cluster_info['cluster_id']} (全局排名: {cluster_info['global_rank']})")
+            pct_info = f"占比: {cluster_pct:.1%}" if cluster_pct is not None else ""
+            print(f"   ✅ 选中: k={cluster_info['k_value']}, cluster_id={cluster_info['cluster_id']} "
+                  f"(全局排名: {cluster_info['global_rank']}) {pct_info}")
             print(f"      训练收益: {cluster_info['train_mean_return']:+.6f} (训练排名: {cluster_info['train_rank']})")
             print(f"      测试收益: {cluster_info['test_mean_return']:+.6f} (测试排名: {cluster_info['test_rank']})")
             print(f"      综合收益: {cluster_info['train_mean_return'] + cluster_info['test_mean_return']:+.6f}")
@@ -272,21 +303,36 @@ class StrategyBacktest:
             # 获取完整数据集（包含目标变量）
             complete_dataset = target_results['complete_dataset']
             
+            # 【关键修复】PCA由于purge导致训练集减少了purge_periods行
+            # 需要根据PCA的train_index和test_index来对齐数据
+            train_index = pca_results['train_index']
+            test_index = pca_results['test_index']
+            
+            # 合并train和test的索引（注意：train_index已经被purge过了）
+            # 所以我们需要使用PCA实际使用的索引
+            pca_used_indices = train_index.union(test_index)
+            
+            # 从complete_dataset中提取对应的数据
+            complete_dataset_aligned = complete_dataset.loc[pca_used_indices]
+            
+            print(f"      📊 完整数据集: {len(complete_dataset)} 行")
+            print(f"      📊 PCA使用数据: {len(pca_used_indices)} 行 (训练:{len(train_index)} + 测试:{len(test_index)})")
+            print(f"      🚫 Purge gap: {len(complete_dataset) - len(pca_used_indices)} 行")
+            
             # 获取PCA降维后的特征数据
-            # 使用所有数据（训练+测试）作为新的测试集
             states_all = np.vstack([pca_results['states_train'], pca_results['states_test']])
             
-            # 创建PCA特征DataFrame
+            # 创建PCA特征DataFrame（使用对齐后的索引）
             pca_columns = [f'PC{i+1}' for i in range(states_all.shape[1])]
-            pca_df = pd.DataFrame(states_all, index=complete_dataset.index, columns=pca_columns)
+            pca_df = pd.DataFrame(states_all, index=complete_dataset_aligned.index, columns=pca_columns)
             
-            # 合并PCA特征和目标变量
-            target_cols = [col for col in complete_dataset.columns 
+            # 合并PCA特征和目标变量（使用对齐后的数据）
+            target_cols = [col for col in complete_dataset_aligned.columns 
                           if col.startswith('future_return_') or col.startswith('label_')]
             
             test_data = pd.concat([
                 pca_df,
-                complete_dataset[target_cols + ['close']]
+                complete_dataset_aligned[target_cols + ['close']]
             ], axis=1)
             
             # 移除包含NaN的行（主要是末尾的目标变量NaN）
@@ -398,20 +444,28 @@ class StrategyBacktest:
         returns = signal_data['future_return_5d'].fillna(0).values
         signal = signal_data['signal_combined'].values
         
+        # 【关键修复】信号对齐: T+1执行
+        # 今天的信号决定明天的仓位,避免look-ahead bias
+        signal_t_plus_1 = np.roll(signal, 1)  # 信号后移1天
+        signal_t_plus_1[0] = 0  # 第一天无信号
+        
+        print(f"   🔄 信号对齐: T+1执行 (今天信号→明天仓位)")
+        print(f"   📊 原始信号: {signal.sum()}/{len(signal)} ({signal.mean():.2%})")
+        print(f"   📊 对齐信号: {signal_t_plus_1.sum()}/{len(signal_t_plus_1)} ({signal_t_plus_1.mean():.2%})")
+        
         # 基准策略：始终持有
         benchmark_returns = returns
         benchmark_cumulative = np.cumprod(1 + benchmark_returns)
         
-        # 策略收益：信号为1时买入持有，信号为0时空仓（持有现金）
-        # 这才是真正的择时策略，可以规避下跌风险
-        strategy_returns = signal * returns
+        # 策略收益：使用对齐后的信号
+        strategy_returns = signal_t_plus_1 * returns
         strategy_cumulative = np.ones(len(strategy_returns))
         
         use_stop_loss = False  # 是否使用止损机制
         stop_loss_threshold = -0.05  # 止损阈值（-5%）
         
         for i in range(1, len(strategy_returns)):
-            if signal[i] == 1:
+            if signal_t_plus_1[i] == 1:
                 # 有信号时，买入持有
                 new_return = returns[i]
                 
