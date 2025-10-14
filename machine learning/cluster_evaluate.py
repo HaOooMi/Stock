@@ -571,6 +571,52 @@ class ClusterEvaluator:
         train_combined = pd.concat(all_train_results, ignore_index=True)
         test_combined = pd.concat(all_test_results, ignore_index=True)
         
+        # === 计算并保存最佳PC信息（基于训练集历史数据） ===
+        print("\n📊 计算最佳PC（基于训练集）...")
+        from scipy import stats
+        
+        # 获取训练集的PCA特征列
+        pca_columns = [col for col in train_combined.columns if col.startswith('PC') and '_' in col]
+        if not pca_columns:
+            # 如果没有PC列,则从states_train推断
+            pca_columns = [f'PC{i+1}' for i in range(states_train.shape[1])]
+        
+        # 计算每个PC与future_return_5d的IC（仅用训练集）
+        ic_list = []
+        for i in range(states_train.shape[1]):
+            pc_values = states_train[:, i]
+            ret_values = targets_df.iloc[:len(states_train)]['future_return_5d'].fillna(0).values
+            
+            # T+1对齐：今天的PC预测明天的收益
+            pc_t1 = np.roll(pc_values, 1)
+            pc_t1[0] = 0  # 第一个位置无T+1
+            
+            ic, _ = stats.spearmanr(pc_t1, ret_values)
+            ic_list.append(ic if not np.isnan(ic) else 0.0)
+        
+        # 选择绝对IC最大的PC
+        abs_ic_list = np.abs(ic_list)
+        best_pc_idx = int(np.argmax(abs_ic_list))
+        best_ic = ic_list[best_pc_idx]
+        
+        pc_metadata = {
+            'best_pc': f'PC{best_pc_idx + 1}',
+            'best_pc_index': best_pc_idx,
+            'pc_direction': 1.0 if best_ic > 0 else -1.0,
+            'pc_threshold': 0.0,  # 可根据需要调整
+            'ic_value': best_ic,
+            'all_ic_values': ic_list,
+            'calculated_time': datetime.now().isoformat()
+        }
+        
+        print(f"   ✅ 最佳PC: {pc_metadata['best_pc']} (IC={best_ic:.4f})")
+        
+        # 保存PC元数据
+        pc_metadata_file = os.path.join(self.reports_dir, "pc_metadata.pkl")
+        with open(pc_metadata_file, 'wb') as f:
+            pickle.dump(pc_metadata, f)
+        print(f"   💾 PC元数据已保存: {pc_metadata_file}")
+        
         # 保存聚类模型
         models_file = os.path.join(self.reports_dir, "cluster_models.pkl")
         with open(models_file, 'wb') as f:

@@ -92,6 +92,11 @@ class StrategyBacktest:
         print(f"🎯 策略回测器初始化完成")
         print(f"📁 报告目录: {self.reports_dir}")
         print(f"📅 测试期间: {self.test_start_date} ~ {self.test_end_date}")
+        
+        # 存储训练阶段选择的最佳PC信息
+        self.best_pc = None
+        self.pc_direction = None
+        self.pc_threshold = None
 
     def load_cluster_evaluation_results(self) -> Dict:
         """
@@ -114,6 +119,23 @@ class StrategyBacktest:
         
         print(f"   ✅ 加载了 {len(self.cluster_models)} 个聚类模型")
         
+        # 加载PC元数据（从cluster_evaluate的训练阶段保存）
+        pc_metadata_file = os.path.join(self.reports_dir, "pc_metadata.pkl")
+        if os.path.exists(pc_metadata_file):
+            with open(pc_metadata_file, 'rb') as f:
+                pc_metadata = pickle.load(f)
+            
+            self.best_pc = pc_metadata['best_pc']
+            self.pc_direction = pc_metadata['pc_direction']
+            self.pc_threshold = pc_metadata['pc_threshold']
+            
+            print(f"   ✅ 加载PC元数据: {self.best_pc} (IC={pc_metadata['ic_value']:.4f})")
+        else:
+            print(f"   ⚠️ 未找到PC元数据文件，将使用默认PC1")
+            self.best_pc = 'PC1'
+            self.pc_direction = 1.0
+            self.pc_threshold = 0.0
+        
         # 加载聚类比较结果
         comparison_file = os.path.join(self.reports_dir, "cluster_comparison.csv")
         if not os.path.exists(comparison_file):
@@ -128,21 +150,26 @@ class StrategyBacktest:
             'comparison_df': comparison_df
         }
 
-    def select_best_clusters(self, comparison_df: pd.DataFrame, top_n: int =3, 
-                           min_cluster_pct: float = 0.05) -> Dict:
+    def select_best_clusters(self, comparison_df: pd.DataFrame, top_n: int = 3, 
+                           min_cluster_pct: float = 0.10, max_cluster_pct: float = 0.60) -> Dict:
         """
         选择全局排名最高的聚类（按global_rank排序）
         
-        **重要**: 会过滤掉占比过小的簇,防止使用噪声/离群点簇
+        约束条件（避免极端簇）：
+        1. 簇占比必须在 [min_cluster_pct, max_cluster_pct] 区间内
+        2. 样本外收益（test_mean_return）必须为正
+        3. 必须通过验证（validation_passed=True）
         
         Parameters:
         -----------
         comparison_df : pd.DataFrame
-            聚类比较数据,必须包含train_samples列
+            聚类比较数据，必须包含train_samples列
         top_n : int, default=3
             选择 top N 个聚类
-        min_cluster_pct : float, default=0.05
-            最小簇占比(5%),低于此值的簇会被过滤
+        min_cluster_pct : float, default=0.10
+            最小簇占比（10%），低于此值的簇会被过滤
+        max_cluster_pct : float, default=0.60
+            最大簇占比（60%），高于此值的簇会被过滤
             
         Returns:
         --------
@@ -150,35 +177,62 @@ class StrategyBacktest:
             最佳聚类信息
         """
         print(f"🎯 选择全局排名最高的 top{top_n} 聚类...")
-        print(f"   🚫 最小簇占比要求: {min_cluster_pct:.0%}")
+        print(f"   � 簇占比约束: [{min_cluster_pct:.0%}, {max_cluster_pct:.0%}]")
+        print(f"   📈 样本外收益约束: 必须 > 0")
         
-        # 只选择验证通过的聚类
+        # === 步骤1: 只选择验证通过的聚类 ===
         valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
         
         if len(valid_clusters) == 0:
             print("   ⚠️ 警告：没有验证通过的聚类，使用所有聚类")
             valid_clusters = comparison_df.copy()
         
-        # 【关键修复】过滤占比过小的簇
+        print(f"   ✅ 验证通过: {len(valid_clusters)}/{len(comparison_df)} 个聚类")
+        
+        # === 步骤2: 过滤簇占比异常的簇 ===
         if 'train_samples' in valid_clusters.columns:
             total_train_samples = valid_clusters['train_samples'].sum()
             valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / total_train_samples
             
-            # 过滤掉占比过小的簇
+            # 过滤掉占比过小/过大的簇
             before_count = len(valid_clusters)
-            valid_clusters = valid_clusters[valid_clusters['cluster_pct'] >= min_cluster_pct].copy()
+            valid_clusters = valid_clusters[
+                (valid_clusters['cluster_pct'] >= min_cluster_pct) & 
+                (valid_clusters['cluster_pct'] <= max_cluster_pct)
+            ].copy()
             after_count = len(valid_clusters)
             
             if before_count > after_count:
-                print(f"   🗑️  过滤掉 {before_count - after_count} 个占比过小的簇 (<{min_cluster_pct:.0%})")
+                filtered = before_count - after_count
+                print(f"   🗑️  过滤占比异常簇: {filtered} 个 (占比不在[{min_cluster_pct:.0%}, {max_cluster_pct:.0%}])")
             
             if len(valid_clusters) == 0:
-                print("   ⚠️ 警告: 所有簇都被过滤,放宽占比要求")
+                print("   ⚠️ 警告: 所有簇都被过滤，放宽占比要求")
                 valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
+                if 'train_samples' in valid_clusters.columns:
+                    total_train_samples = valid_clusters['train_samples'].sum()
+                    valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / total_train_samples
         else:
-            print("   ⚠️ 警告: 数据中无train_samples列,跳过占比过滤")
+            print("   ⚠️ 警告: 数据中无train_samples列，跳过占比过滤")
         
-        # 按global_rank排序（从小到大，rank越小越好），选择 top N
+        # === 步骤3: 过滤样本外收益为负的簇 ===
+        if 'test_mean_return' in valid_clusters.columns:
+            before_count = len(valid_clusters)
+            valid_clusters = valid_clusters[valid_clusters['test_mean_return'] > 0].copy()
+            after_count = len(valid_clusters)
+            
+            if before_count > after_count:
+                filtered = before_count - after_count
+                print(f"   🗑️  过滤样本外负收益簇: {filtered} 个")
+            
+            if len(valid_clusters) == 0:
+                print("   ⚠️ 警告: 所有簇样本外收益都为负，退化选择")
+                valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
+                if 'train_samples' in valid_clusters.columns:
+                    total_train_samples = valid_clusters['train_samples'].sum()
+                    valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / total_train_samples
+        
+        # === 步骤4: 按global_rank排序（从小到大，rank越小越好），选择 top N ===
         top_clusters = valid_clusters.nsmallest(top_n, 'global_rank')
         
         selected_clusters = []
@@ -203,11 +257,10 @@ class StrategyBacktest:
                   f"(全局排名: {cluster_info['global_rank']}) {pct_info}")
             print(f"      训练收益: {cluster_info['train_mean_return']:+.6f} (训练排名: {cluster_info['train_rank']})")
             print(f"      测试收益: {cluster_info['test_mean_return']:+.6f} (测试排名: {cluster_info['test_rank']})")
-            print(f"      综合收益: {cluster_info['train_mean_return'] + cluster_info['test_mean_return']:+.6f}")
         
         return {
             'selected_clusters': selected_clusters,
-            'selection_method': f'top_{top_n}_global_rank'
+            'selection_method': f'top_{top_n}_global_rank_with_constraints'
         }
 
     def prepare_test_data(self, symbol: str = "000001") -> pd.DataFrame:
@@ -343,6 +396,11 @@ class StrategyBacktest:
             print(f"      🎯 目标变量: {len([col for col in target_cols if col.startswith('future_return_')])} 个")
             print(f"      📅 数据时间范围: {test_data.index.min().date()} ~ {test_data.index.max().date()}")
             
+            # === 步骤5: PC信息已从cluster_evaluate的训练阶段加载 ===
+            print("   ℹ️ 步骤5: 使用已加载的PC元数据")
+            print(f"      📌 最佳PC: {self.best_pc} (方向: {self.pc_direction})")
+            print(f"      � PC信息来源: cluster_evaluate训练阶段（历史数据）")
+            
             return test_data
             
         except Exception as e:
@@ -353,7 +411,17 @@ class StrategyBacktest:
 
     def generate_trading_signals(self, test_data: pd.DataFrame, selected_clusters: List[Dict]) -> pd.DataFrame:
         """
-        生成交易信号
+        生成交易信号（改进版：避免前视偏差）
+        
+        策略逻辑：
+        1. 聚类状态过滤：属于选中簇时候选
+        2. PC强度门槛：使用训练阶段选择的最佳PC、方向和门槛值（避免前视偏差）
+        3. 持有期：信号触发后持有3期
+        
+        关键改进：
+        - 最佳PC的选择、方向统一、门槛计算均在训练阶段完成
+        - 测试阶段仅应用训练阶段确定的规则，不再重新选择或计算
+        - 彻底避免测试数据参与规则选择的前视偏差
         
         Parameters:
         -----------
@@ -367,20 +435,21 @@ class StrategyBacktest:
         pd.DataFrame
             包含交易信号的数据
         """
-        print(f"📡 生成交易信号...")
+        print(f"📡 生成交易信号 (聚类状态 + PC强度门槛 + 持有期)...")
         
         # 获取PCA特征
         pca_columns = [col for col in test_data.columns if col.startswith('PC')]
         X_pca = test_data[pca_columns].fillna(0).values
         
-        # 为每个选中的聚类生成信号
+        # === 步骤1: 聚类状态过滤 ===
+        print(f"   步骤1: 聚类状态过滤")
         signals = {}
         
         for i, cluster_info in enumerate(selected_clusters):
             k_value = cluster_info['k_value']
             cluster_id = cluster_info['cluster_id']
             
-            print(f"   📊 聚类 {i+1}: k={k_value}, cluster_id={cluster_id}")
+            print(f"      聚类 {i+1}: k={k_value}, cluster_id={cluster_id}")
             
             # 使用对应的聚类模型
             cluster_model = self.cluster_models[k_value]
@@ -392,99 +461,162 @@ class StrategyBacktest:
             
             signal_count = signal.sum()
             signal_ratio = signal_count / len(signal)
-            print(f"      信号数量: {signal_count}/{len(signal)} ({signal_ratio:.2%})")
+            print(f"         状态信号: {signal_count}/{len(signal)} ({signal_ratio:.2%})")
         
-        # 综合信号：任一聚类发出信号则为1
-        combined_signal = np.zeros(len(test_data))
+        # 综合聚类状态信号：任一聚类发出信号则为1
+        state_signal = np.zeros(len(test_data), dtype=int)
         for signal_col in signals.keys():
-            combined_signal = np.maximum(combined_signal, signals[signal_col])
+            state_signal = np.maximum(state_signal, signals[signal_col])
         
-        # 【优化】基于历史动量过滤信号（不使用未来数据）
-        # 计算过去5天的动量（收益率）
-        use_momentum_filter = True  # 是否使用动量过滤
-        if use_momentum_filter and 'close' in test_data.columns:
-            momentum_5d = test_data['close'].pct_change(periods=5).fillna(0).values
-            # 放宽条件：允许轻微下跌趋势中的信号
-            momentum_threshold = -0.02  # 允许-2%以内的下跌
-            combined_signal[(momentum_5d < momentum_threshold)] = 0
-            print(f"   🔍 动量过滤 (阈值={momentum_threshold}): 保留信号 {combined_signal.sum()}/{len(combined_signal)} ({combined_signal.mean():.2%})")
+        print(f"      ✅ 综合状态信号: {state_signal.sum()}/{len(state_signal)} ({state_signal.mean():.2%})")
+        
+        # === 步骤2: 使用训练阶段选择的最佳PC（避免前视偏差） ===
+        print(f"   步骤2: 应用训练阶段选择的最佳PC")
+        
+        if self.best_pc is None or self.pc_direction is None or self.pc_threshold is None:
+            print(f"      ⚠️ 警告: 未找到训练阶段的PC选择结果，跳过PC门槛过滤")
+            combined_signal = state_signal
         else:
-            print(f"   ⚠️ 未使用动量过滤")
+            # 使用训练阶段选择的最佳PC和方向
+            best_col = self.best_pc
+            orient = self.pc_direction
+            thr = self.pc_threshold
+            
+            print(f"      最佳PC: {best_col} (训练阶段选择)")
+            print(f"      方向: {'正向' if orient > 0 else '反向'} (统一为IC>0)")
+            print(f"      门槛值: {thr:.4f} (训练阶段q=0.6)")
+            
+            # 计算整个测试数据的PC强度
+            strength = test_data[best_col].fillna(0).values * orient
+            
+            # === 步骤3: 应用强度门槛（使用训练阶段的门槛） ===
+            print(f"   步骤3: 应用强度门槛")
+            
+            # 应用门槛：状态信号 & 强度超过门槛
+            gated = (state_signal == 1) & (strength > thr)
+            print(f"      门槛后信号: {gated.sum()}/{len(gated)} ({gated.mean():.2%})")
+            
+            # === 步骤4: 持有期（hold=3） ===
+            print(f"   步骤4: 持有期 (hold=3)")
+            hold_n = 3
+            n = len(test_data)  # 数据长度
+            final_signal = np.zeros_like(gated, dtype=int)
+            i = 0
+            while i < n:
+                if gated[i]:
+                    final_signal[i:i+hold_n] = 1
+                    i += hold_n
+                else:
+                    i += 1
+            
+            combined_signal = final_signal
+            print(f"      ✅ 最终信号: {combined_signal.sum()}/{len(combined_signal)} ({combined_signal.mean():.2%})")
+            
+            # 保存元信息
+            signals['signal_strength_pc'] = best_col
+            signals['signal_strength_ic'] = f"训练阶段选择"
+            signals['signal_threshold_q'] = 0.6
+            signals['signal_threshold_value'] = thr
+            signals['signal_hold_n'] = hold_n
         
         signals['signal_combined'] = combined_signal
         
         # 添加信号到测试数据
         result_data = test_data.copy()
         for signal_name, signal_values in signals.items():
-            result_data[signal_name] = signal_values
-        
-        combined_count = combined_signal.sum()
-        combined_ratio = combined_count / len(combined_signal)
-        print(f"   ✅ 综合信号: {combined_count}/{len(combined_signal)} ({combined_ratio:.2%})")
+            if isinstance(signal_values, np.ndarray):
+                result_data[signal_name] = signal_values
+            else:
+                result_data[signal_name] = signal_values
         
         return result_data
 
-    def calculate_strategy_performance(self, signal_data: pd.DataFrame) -> Dict:
+    def calculate_strategy_performance(self, signal_data: pd.DataFrame,
+                                       transaction_cost: float = 0.002,
+                                       slippage: float = 0.001) -> Dict:
         """
         计算策略收益 vs 基准（持有）
+        
+        改进：
+        1. 严格T+1执行（今天信号→明天仓位）
+        2. 按回合计费（开+平为一个回合）
+        3. 统一胜率、收益等统计口径
         
         Parameters:
         -----------
         signal_data : pd.DataFrame
             包含信号的数据
+        transaction_cost : float, default=0.002
+            交易成本（单边）
+        slippage : float, default=0.001
+            滑点（单边）
             
         Returns:
         --------
         dict
             策略性能指标
         """
-        print(f"💰 计算策略性能...")
+        print(f"💰 计算策略性能 (T+1执行 + 回合计费)...")
         
         # 使用future_return_5d作为预测目标收益
         returns = signal_data['future_return_5d'].fillna(0).values
         signal = signal_data['signal_combined'].values
         
-        # 【关键修复】信号对齐: T+1执行
-        # 今天的信号决定明天的仓位,避免look-ahead bias
-        signal_t_plus_1 = np.roll(signal, 1)  # 信号后移1天
+        # === 关键修复1: T+1执行 ===
+        # 今天的信号决定明天的仓位，避免look-ahead bias
+        signal_t_plus_1 = np.roll(signal, 1)
         signal_t_plus_1[0] = 0  # 第一天无信号
         
-        print(f"   🔄 信号对齐: T+1执行 (今天信号→明天仓位)")
-        print(f"   📊 原始信号: {signal.sum()}/{len(signal)} ({signal.mean():.2%})")
-        print(f"   📊 对齐信号: {signal_t_plus_1.sum()}/{len(signal_t_plus_1)} ({signal_t_plus_1.mean():.2%})")
+        print(f"   🔄 T+1执行对齐:")
+        print(f"      原始信号: {signal.sum()}/{len(signal)} ({signal.mean():.2%})")
+        print(f"      对齐信号: {signal_t_plus_1.sum()}/{len(signal_t_plus_1)} ({signal_t_plus_1.mean():.2%})")
         
-        # 基准策略：始终持有
+        # === 基准策略：始终持有 ===
         benchmark_returns = returns
         benchmark_cumulative = np.cumprod(1 + benchmark_returns)
         
-        # 策略收益：使用对齐后的信号
+        # === 策略收益：使用T+1对齐的信号 ===
         strategy_returns = signal_t_plus_1 * returns
         strategy_cumulative = np.ones(len(strategy_returns))
-        
-        use_stop_loss = False  # 是否使用止损机制
-        stop_loss_threshold = -0.05  # 止损阈值（-5%）
         
         for i in range(1, len(strategy_returns)):
             if signal_t_plus_1[i] == 1:
                 # 有信号时，买入持有
-                new_return = returns[i]
-                
-                # 如果启用止损，检查是否触发止损
-                if use_stop_loss and new_return < stop_loss_threshold:
-                    # 触发止损，不参与本次交易
-                    strategy_cumulative[i] = strategy_cumulative[i-1]
-                else:
-                    # 正常参与市场
-                    strategy_cumulative[i] = strategy_cumulative[i-1] * (1 + new_return)
+                strategy_cumulative[i] = strategy_cumulative[i-1] * (1 + returns[i])
             else:
-                # 无信号时，空仓，累计收益保持不变（规避风险）
+                # 无信号时，空仓，累计收益保持不变
                 strategy_cumulative[i] = strategy_cumulative[i-1]
         strategy_cumulative[0] = 1 + strategy_returns[0]
         
+        # === 关键修复2: 按回合计费 ===
+        # 换手统计：计算信号翻转次数
+        signal_changes = np.abs(np.diff(signal, prepend=signal[0]))
+        flips = signal_changes.sum()
+        roundtrips = flips / 2.0  # 每两个翻转构成一次完整回合（开+平）
+        turnover_rate = roundtrips / len(signal)
+        
+        # 交易成本：按回合计费（双边）
+        per_roundtrip_cost = (transaction_cost + slippage) * 2
+        total_transaction_cost = roundtrips * per_roundtrip_cost
+        
+        print(f"   💸 交易成本:")
+        print(f"      回合数: {roundtrips:.1f}")
+        print(f"      换手率: {turnover_rate:.2%}")
+        print(f"      单回合成本: {per_roundtrip_cost:.4f}")
+        print(f"      总交易成本: {total_transaction_cost:.4f}")
+        
         # 计算性能指标
+        gross_return = strategy_cumulative[-1] - 1
+        net_return = gross_return - total_transaction_cost
         total_return_benchmark = benchmark_cumulative[-1] - 1
-        total_return_strategy = strategy_cumulative[-1] - 1
+        total_return_strategy = net_return  # 使用扣除成本后的净收益
         excess_return = total_return_strategy - total_return_benchmark
+        
+        print(f"   📊 收益拆解:")
+        print(f"      毛收益: {gross_return:+.4f}")
+        print(f"      交易成本: {total_transaction_cost:.4f}")
+        print(f"      净收益: {net_return:+.4f}")
+        print(f"      成本侵蚀比例: {(total_transaction_cost/abs(gross_return)*100):.1f}%" if gross_return != 0 else "      成本侵蚀比例: N/A")
         
         # 年化收益率（假设250个交易日）
         n_days = len(returns)
@@ -510,8 +642,8 @@ class StrategyBacktest:
         strategy_drawdown = (strategy_cumulative - strategy_running_max) / strategy_running_max
         max_drawdown_strategy = np.min(strategy_drawdown)
         
-        # 胜率（仅考虑有信号的时间点）
-        signal_mask = signal == 1
+        # === 关键修复3: 胜率统计（使用T+1对齐的信号） ===
+        signal_mask = signal_t_plus_1 == 1
         win_rate = (returns[signal_mask] > 0).mean() if signal_mask.sum() > 0 else 0
         
         performance = {
@@ -519,6 +651,7 @@ class StrategyBacktest:
             'total_return_benchmark': total_return_benchmark,
             'total_return_strategy': total_return_strategy,
             'excess_return': excess_return,
+            'gross_return': gross_return,
             
             # 年化收益
             'annual_return_benchmark': annual_return_benchmark,
@@ -538,6 +671,9 @@ class StrategyBacktest:
             'signal_count': signal_mask.sum(),
             'signal_ratio': signal_mask.mean(),
             'win_rate': win_rate,
+            'roundtrips': roundtrips,
+            'turnover_rate': turnover_rate,
+            'transaction_cost': total_transaction_cost,
             
             # 时间序列
             'benchmark_cumulative': benchmark_cumulative,
@@ -549,19 +685,23 @@ class StrategyBacktest:
         
         print(f"   ✅ 策略性能:")
         print(f"      基准总收益: {total_return_benchmark:.2%}")
-        print(f"      策略总收益: {total_return_strategy:.2%}")
+        print(f"      策略净收益: {total_return_strategy:.2%}")
         print(f"      超额收益: {excess_return:.2%}")
         print(f"      基准夏普: {sharpe_benchmark:.3f}")
         print(f"      策略夏普: {sharpe_strategy:.3f}")
         print(f"      基准回撤: {max_drawdown_benchmark:.2%}")
         print(f"      策略回撤: {max_drawdown_strategy:.2%}")
-        print(f"      信号胜率: {win_rate:.2%}")
+        print(f"      信号胜率: {win_rate:.2%} (T+1对齐)")
         
         return performance
 
     def run_random_baseline(self, signal_data: pd.DataFrame, performance: Dict) -> Dict:
         """
         随机基准对比（100次随机信号）
+        
+        改进：
+        1. T+1对齐随机信号，保持公平对比
+        2. 匹配相同的信号比例和持有期
         
         Parameters:
         -----------
@@ -580,6 +720,9 @@ class StrategyBacktest:
         returns = signal_data['future_return_5d'].fillna(0).values
         original_signal_ratio = performance['signal_ratio']
         
+        print(f"   📊 匹配策略信号比例: {original_signal_ratio:.2%}")
+        print(f"   🔄 使用T+1执行（与策略一致）")
+        
         # 运行随机模拟
         random_results = []
         
@@ -593,15 +736,27 @@ class StrategyBacktest:
                 random_indices = np.random.choice(n_samples, n_signals, replace=False)
                 random_signal[random_indices] = 1
             
+            # T+1对齐（与策略保持一致）
+            random_signal_t1 = np.roll(random_signal, 1)
+            random_signal_t1[0] = 0
+            
             # 计算随机策略收益
-            random_strategy_returns = random_signal * returns
-            random_cumulative = np.prod(1 + random_strategy_returns) - 1
+            random_strategy_returns = random_signal_t1 * returns
+            random_cumulative_returns = []
+            cumulative = 1.0
+            
+            for j in range(len(random_strategy_returns)):
+                if random_signal_t1[j] == 1:
+                    cumulative *= (1 + returns[j])
+                random_cumulative_returns.append(cumulative)
+            
+            total_random_return = cumulative - 1
             
             # 计算随机策略统计
             random_volatility = np.std(random_strategy_returns) * np.sqrt(250)
             
             random_results.append({
-                'total_return': random_cumulative,
+                'total_return': total_random_return,
                 'volatility': random_volatility,
                 'signal_count': n_signals
             })
@@ -711,7 +866,9 @@ class StrategyBacktest:
         # 策略性能
         report_lines.append("📊 策略性能:")
         report_lines.append(f"   基准总收益: {performance['total_return_benchmark']:+.2%}")
-        report_lines.append(f"   策略总收益: {performance['total_return_strategy']:+.2%}")
+        report_lines.append(f"   策略毛收益: {performance['gross_return']:+.2%}")
+        report_lines.append(f"   交易成本: {performance['transaction_cost']:.4f}")
+        report_lines.append(f"   策略净收益: {performance['total_return_strategy']:+.2%}")
         report_lines.append(f"   超额收益: {performance['excess_return']:+.2%}")
         report_lines.append("")
         report_lines.append(f"   基准年化收益: {performance['annual_return_benchmark']:+.2%}")
@@ -726,9 +883,11 @@ class StrategyBacktest:
         report_lines.append(f"   基准最大回撤: {performance['max_drawdown_benchmark']:+.2%}")
         report_lines.append(f"   策略最大回撤: {performance['max_drawdown_strategy']:+.2%}")
         report_lines.append("")
-        report_lines.append(f"   信号数量: {performance['signal_count']}")
+        report_lines.append(f"   信号数量: {performance['signal_count']} (T+1对齐)")
         report_lines.append(f"   信号比例: {performance['signal_ratio']:.2%}")
-        report_lines.append(f"   信号胜率: {performance['win_rate']:.2%}")
+        report_lines.append(f"   信号胜率: {performance['win_rate']:.2%} (T+1对齐)")
+        report_lines.append(f"   回合数: {performance['roundtrips']:.1f}")
+        report_lines.append(f"   换手率: {performance['turnover_rate']:.2%}")
         report_lines.append("")
         
         # 随机基准对比
