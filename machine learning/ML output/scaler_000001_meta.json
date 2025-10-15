@@ -1,33 +1,33 @@
 {
   "feature_cols": [
     "rolling_std_30d",
-    "atr_14",
-    "macd_hist",
-    "rolling_std_20d",
-    "skewness_20d",
-    "rolling_std_10d",
-    "kurtosis_20d",
-    "涨跌额",
-    "macd",
-    "volume_ma_5",
     "rsi_14",
-    "rolling_std_5d",
+    "macd",
+    "bb_upper",
     "auto_close__maximum",
+    "rolling_std_20d",
+    "rolling_std_10d",
+    "涨跌额",
+    "macd_hist",
+    "volume_roc_5d",
+    "kurtosis_20d",
+    "volume_change",
     "volume_roc_10d",
-    "volume_roc_3d"
+    "volume_ratio_20d",
+    "skewness_20d"
   ],
   "scaler_type": "robust",
   "train_ratio": 0.8,
-  "train_samples": 326,
-  "total_samples": 408,
+  "train_samples": 134,
+  "total_samples": 168,
   "train_range": [
     "2023-03-27",
-    "2024-07-29"
+    "2023-10-16"
   ],
   "valid_range": [
-    "2024-07-30",
-    "2024-11-29"
+    "2023-10-17",
+    "2023-12-01"
   ],
-  "fit_timestamp": "2025-10-15T15:54:30.441926",
+  "fit_timestamp": "2025-10-15T20:54:33.506262",
   "feature_count": 15
 }
