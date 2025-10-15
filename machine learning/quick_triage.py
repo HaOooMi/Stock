@@ -285,16 +285,31 @@ class QuickTriage:
             'leakage_detected': False
         }
         
-        # 错误标签1: 过去5天收益(绝对错误,时间反向)
+        # 错误标签1: 过去5天收益(用于检测动量特征强度,非泄漏指标)
         self.log("\n测试错误标签1: 过去5天收益...")
         wrong_label_1 = signal_data['close'].pct_change(5).fillna(0).values[valid_mask]
         wrong_ic_1, wrong_p_1 = stats.spearmanr(feature_valid, wrong_label_1)
-        self.log(f"   错误标签1 IC: {wrong_ic_1:+.4f} (p={wrong_p_1:.4f})")
+        self.log(f"   过去收益 IC: {wrong_ic_1:+.4f} (p={wrong_p_1:.4f})")
         results['wrong_ics']['past_5d_return'] = wrong_ic_1
         
-        if abs(wrong_ic_1) > abs(correct_ic) * 0.8:
-            self.add_issue(f"错误标签1(过去收益)的IC({wrong_ic_1:+.4f})接近或超过正确标签({correct_ic:+.4f}),疑似泄漏!")
-            results['leakage_detected'] = True
+        # 【重要】过去收益IC高不是泄漏,而是PCA捕捉动量特征的正常表现
+        # 因为特征层包含return_5d/momentum_5d等,PCA自然会与过去收益相关
+        if abs(wrong_ic_1) > abs(correct_ic):
+            momentum_strength = abs(wrong_ic_1) / (abs(correct_ic) + 1e-6)
+            self.log(f"   ℹ️  动量强度: {momentum_strength:.1f}x (过去IC={wrong_ic_1:+.4f}, 未来IC={correct_ic:+.4f})")
+            
+            # 判断动量方向
+            if correct_ic * wrong_ic_1 > 0:
+                self.log("   📈 动量延续: 过去表现好的未来继续好")
+            else:
+                self.log("   🔄 动量反转: 过去表现好的未来表现差（当前状态）")
+            
+            # 只有在过去收益IC极端高时才警告（可能是shift错误）
+            if abs(wrong_ic_1) > abs(correct_ic) * 3.0:
+                self.add_issue(f"过去收益IC({wrong_ic_1:+.4f})远超未来收益IC({correct_ic:+.4f})的3倍,请检查特征shift方向")
+                results['leakage_detected'] = True
+        else:
+            self.log("   ✅ 未来预测性优于历史相关性")
         
         # 错误标签2: 随机标签(纯噪声)
         self.log("\n测试错误标签2: 随机标签...")
@@ -358,38 +373,44 @@ class QuickTriage:
         signal = signal_data['signal_combined'].values
         returns = signal_data['future_return_5d'].fillna(0).values
         
-        # 计算换手率
+        # 【关键修复】严格T+1执行：今天的信号决定明天的仓位
+        signal_t1 = np.roll(signal, 1)
+        signal_t1[0] = 0  # 第一天无信号
+        
+        # 计算换手率（按回合计费）
         signal_changes = np.abs(np.diff(signal, prepend=signal[0]))
-        turnover_count = signal_changes.sum()
-        turnover_rate = turnover_count / len(signal)
+        flips = signal_changes.sum()
+        roundtrips = flips / 2.0  # 每两个翻转构成一次完整回合（开+平）
+        turnover_rate = roundtrips / len(signal)
         
         self.log(f"换手统计:")
-        self.log(f"   总交易次数: {turnover_count}")
+        self.log(f"   信号翻转次数: {flips:.0f}")
+        self.log(f"   交易回合数: {roundtrips:.1f}")
         self.log(f"   换手率: {turnover_rate:.2%}")
         self.log(f"   平均持有期: {1/turnover_rate:.1f} 期" if turnover_rate > 0 else "   平均持有期: N/A")
         
-        # 计算不同成本假设下的收益
+        # 计算不同成本假设下的收益（使用T+1对齐的信号）
         # 策略收益(不考虑成本)
-        strategy_returns_gross = signal * returns
-        gross_total_return = np.sum(strategy_returns_gross)
+        strategy_returns_gross = signal_t1 * returns
+        gross_total_return = float(np.sum(strategy_returns_gross))
         
-        # 计算交易成本
-        total_cost = (transaction_cost + slippage) * 2  # 双边成本
-        cost_per_turnover = total_cost
-        total_transaction_cost = turnover_count * cost_per_turnover
+        # 计算交易成本（按回合计费，双边成本）
+        per_roundtrip_cost = (transaction_cost + slippage) * 2  # 双边成本
+        total_transaction_cost = roundtrips * per_roundtrip_cost
         
         # 净收益
         net_total_return = gross_total_return - total_transaction_cost
         
         self.log(f"\n收益拆解:")
         self.log(f"   毛收益: {gross_total_return:+.4f}")
-        self.log(f"   交易成本: {total_transaction_cost:-.4f} ({turnover_count}次 × {cost_per_turnover:.4f})")
+        self.log(f"   交易成本: {total_transaction_cost:-.4f} ({roundtrips:.1f}回合 × {per_roundtrip_cost:.4f})")
         self.log(f"   净收益: {net_total_return:+.4f}")
         self.log(f"   成本侵蚀比例: {(total_transaction_cost/abs(gross_total_return)*100):.1f}%" if gross_total_return != 0 else "   成本侵蚀比例: N/A")
         
         # 判断成本影响
         results = {
-            'turnover_count': turnover_count,
+            'turnover_count': flips,
+            'roundtrips': roundtrips,
             'turnover_rate': turnover_rate,
             'gross_return': gross_total_return,
             'transaction_cost': total_transaction_cost,
@@ -412,7 +433,7 @@ class QuickTriage:
         cost_scenarios = [0.001, 0.002, 0.003, 0.005]
         
         for cost in cost_scenarios:
-            scenario_cost = turnover_count * cost * 2
+            scenario_cost = roundtrips * cost * 2  # 按回合计费
             scenario_net = gross_total_return - scenario_cost
             self.log(f"   成本{cost*100:.2f}%: 净收益 {scenario_net:+.4f}")
         

@@ -290,6 +290,10 @@ class FeatureEngineer:
         # 清理无用列
         feature_columns = [col for col in data.columns 
                           if col not in ['datetime', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'open_interest']]
+
+        # 为避免当期信息泄漏，所有特征整体滞后1期（决策时只能看到上一日的特征）
+        if feature_columns:
+            data[feature_columns] = data[feature_columns].shift(1)
         
         # 创建手工特征结果，保持时间索引一致性
         manual_result = data[['close'] + feature_columns].dropna()

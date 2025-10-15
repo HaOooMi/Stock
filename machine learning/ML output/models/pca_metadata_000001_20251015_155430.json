@@ -1,0 +1,17 @@
+{
+  "symbol": "000001",
+  "created_time": "2025-10-15T15:54:30.691790",
+  "original_features": 15,
+  "n_components": 5,
+  "cumulative_variance": 0.7900080173613812,
+  "compression_ratio": 3.0,
+  "train_samples": 316,
+  "test_samples": 82,
+  "train_period": "2023-03-27 ~ 2024-07-15",
+  "test_period": "2024-07-30 ~ 2024-11-29",
+  "files": {
+    "pca_model": "pca_000001_20251015_155430.pkl",
+    "states_train": "states_pca_train_000001_20251015_155430.npy",
+    "states_test": "states_pca_test_000001_20251015_155430.npy"
+  }
+}

@@ -150,10 +150,7 @@ class PCAStateGenerator:
         split_idx = int(n_samples * train_ratio)
         
         # Purge训练集尾部(防止标签泄漏)
-        split_idx_purged = split_idx - purge_periods
-        
-        # Purge训练集尾部(防止标签泄漏)
-        split_idx_purged = split_idx - purge_periods
+        split_idx_purged = split_idx - purge_periods      
         
         if split_idx_purged < 50:
             raise ValueError(f"训练样本过少({split_idx_purged}),请减小purge_periods或增加train_ratio")
@@ -717,8 +714,8 @@ def main():
         # 配置参数
         config = {
             'symbol': '000001',  # 平安银行
-            'start_date': '2023-01-01',
-            'end_date': '2024-12-31',
+            'start_date': '2020-01-01',
+            'end_date': '2022-12-31',
             'use_auto_features': True,  # 是否使用自动特征生成
             'final_k_features': 15,      # 最终特征数量
             'target_periods': [1, 5, 10], # 目标时间窗口

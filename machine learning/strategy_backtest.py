@@ -82,8 +82,8 @@ class StrategyBacktest:
         os.makedirs(self.reports_dir, exist_ok=True)
         
         # 策略参数
-        self.test_start_date = "2025-01-01"
-        self.test_end_date = "2025-08-01"
+        self.test_start_date = "2023-01-01"
+        self.test_end_date = "2024-12-01"
         self.random_simulations = 100
         
         # 存储模型和数据
@@ -97,6 +97,7 @@ class StrategyBacktest:
         self.best_pc = None
         self.pc_direction = None
         self.pc_threshold = None
+        self.pc_threshold_quantile = None
 
     def load_cluster_evaluation_results(self) -> Dict:
         """
@@ -125,16 +126,19 @@ class StrategyBacktest:
             with open(pc_metadata_file, 'rb') as f:
                 pc_metadata = pickle.load(f)
             
-            self.best_pc = pc_metadata['best_pc']
-            self.pc_direction = pc_metadata['pc_direction']
-            self.pc_threshold = pc_metadata['pc_threshold']
+            self.best_pc = pc_metadata.get('best_pc', 'PC1')
+            self.pc_direction = pc_metadata.get('pc_direction', 1.0)
+            self.pc_threshold = pc_metadata.get('pc_threshold', 0.0)
+            self.pc_threshold_quantile = pc_metadata.get('threshold_quantile', 0.6)
+            ic_value = pc_metadata.get('ic_value', 0.0)
             
-            print(f"   ✅ 加载PC元数据: {self.best_pc} (IC={pc_metadata['ic_value']:.4f})")
+            print(f"   ✅ 加载PC元数据: {self.best_pc} (IC={ic_value:+.4f}, 方向={self.pc_direction:+.1f}, 门槛={self.pc_threshold:.4f})")
         else:
             print(f"   ⚠️ 未找到PC元数据文件，将使用默认PC1")
             self.best_pc = 'PC1'
             self.pc_direction = 1.0
             self.pc_threshold = 0.0
+            self.pc_threshold_quantile = 0.6
         
         # 加载聚类比较结果
         comparison_file = os.path.join(self.reports_dir, "cluster_comparison.csv")
@@ -191,12 +195,15 @@ class StrategyBacktest:
         
         # === 步骤2: 过滤簇占比异常的簇 ===
         if 'train_samples' in valid_clusters.columns:
-            total_train_samples = valid_clusters['train_samples'].sum()
-            valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / total_train_samples
+            group_totals = valid_clusters.groupby('k_value')['train_samples'].transform('sum')
+            # 避免除以0
+            group_totals = group_totals.replace(0, np.nan)
+            valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / group_totals
             
             # 过滤掉占比过小/过大的簇
             before_count = len(valid_clusters)
             valid_clusters = valid_clusters[
+                (valid_clusters['cluster_pct'].notna()) &
                 (valid_clusters['cluster_pct'] >= min_cluster_pct) & 
                 (valid_clusters['cluster_pct'] <= max_cluster_pct)
             ].copy()
@@ -210,8 +217,8 @@ class StrategyBacktest:
                 print("   ⚠️ 警告: 所有簇都被过滤，放宽占比要求")
                 valid_clusters = comparison_df[comparison_df['validation_passed'] == True].copy()
                 if 'train_samples' in valid_clusters.columns:
-                    total_train_samples = valid_clusters['train_samples'].sum()
-                    valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / total_train_samples
+                    group_totals = valid_clusters.groupby('k_value')['train_samples'].transform('sum').replace(0, np.nan)
+                    valid_clusters['cluster_pct'] = valid_clusters['train_samples'] / group_totals
         else:
             print("   ⚠️ 警告: 数据中无train_samples列，跳过占比过滤")
         
@@ -398,8 +405,11 @@ class StrategyBacktest:
             
             # === 步骤5: PC信息已从cluster_evaluate的训练阶段加载 ===
             print("   ℹ️ 步骤5: 使用已加载的PC元数据")
-            print(f"      📌 最佳PC: {self.best_pc} (方向: {self.pc_direction})")
-            print(f"      � PC信息来源: cluster_evaluate训练阶段（历史数据）")
+            print(f"      📌 最佳PC: {self.best_pc} (方向: {self.pc_direction:+.1f})")
+            if self.pc_threshold is not None:
+                quantile = self.pc_threshold_quantile if self.pc_threshold_quantile is not None else 0.6
+                print(f"      🎯 强度门槛: {self.pc_threshold:.4f} (q={quantile:.2f})")
+            print("      💡 PC信息来源: cluster_evaluate训练阶段（历史数据）")
             
             return test_data
             
@@ -484,7 +494,8 @@ class StrategyBacktest:
             
             print(f"      最佳PC: {best_col} (训练阶段选择)")
             print(f"      方向: {'正向' if orient > 0 else '反向'} (统一为IC>0)")
-            print(f"      门槛值: {thr:.4f} (训练阶段q=0.6)")
+            threshold_q = self.pc_threshold_quantile if self.pc_threshold_quantile is not None else 0.6
+            print(f"      门槛值: {thr:.4f} (训练阶段q={threshold_q:.2f})")
             
             # 计算整个测试数据的PC强度
             strength = test_data[best_col].fillna(0).values * orient
@@ -515,7 +526,7 @@ class StrategyBacktest:
             # 保存元信息
             signals['signal_strength_pc'] = best_col
             signals['signal_strength_ic'] = f"训练阶段选择"
-            signals['signal_threshold_q'] = 0.6
+            signals['signal_threshold_q'] = threshold_q
             signals['signal_threshold_value'] = thr
             signals['signal_hold_n'] = hold_n
         

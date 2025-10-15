@@ -256,11 +256,20 @@ class ClusterEvaluator:
         
         # 测试集验证：最佳聚类仍在前50%
         best_train_cluster = train_results.iloc[0]['cluster_id']
-        test_best_rank = test_results[test_results['cluster_id'] == best_train_cluster]['rank'].iloc[0]
-        total_clusters = len(test_results)
-        validation['test_best_cluster_rank'] = test_best_rank
-        validation['total_clusters'] = total_clusters
-        validation['test_top_50_percent'] = test_best_rank <= (total_clusters * 0.5)
+        test_cluster_match = test_results[test_results['cluster_id'] == best_train_cluster]
+        
+        if len(test_cluster_match) > 0:
+            test_best_rank = test_cluster_match['rank'].iloc[0]
+            total_clusters = len(test_results)
+            validation['test_best_cluster_rank'] = test_best_rank
+            validation['total_clusters'] = total_clusters
+            validation['test_top_50_percent'] = test_best_rank <= (total_clusters * 0.5)
+        else:
+            # 训练集最佳簇在测试集中不存在
+            print(f"   ⚠️ 警告: 训练集最佳簇 {best_train_cluster} 在测试集中无样本")
+            validation['test_best_cluster_rank'] = None
+            validation['total_clusters'] = len(test_results)
+            validation['test_top_50_percent'] = False
         
         return validation
     
@@ -405,6 +414,17 @@ class ClusterEvaluator:
                         row_data[f'train_{col}'] = train_data[col]
                     
                     detailed_csv_data.append(row_data)
+                elif len(train_row) > 0:
+                    # 只在训练集中存在
+                    train_data = train_row.iloc[0]
+                    main_report_lines.append(f"  聚类{cluster_id}: 训练收益={train_data['mean_return']:+.6f}(排名{train_data['rank']}), 测试集无样本")
+                elif len(test_row) > 0:
+                    # 只在测试集中存在
+                    test_data = test_row.iloc[0]
+                    main_report_lines.append(f"  聚类{cluster_id}: 训练集无样本, 测试收益={test_data['mean_return']:+.6f}(排名{test_data['rank']})")
+                else:
+                    # 训练集和测试集都没有样本（理论上不应该发生）
+                    main_report_lines.append(f"  聚类{cluster_id}: 训练集和测试集都无样本")
             
             # 保存单独的k值详细CSV
             if detailed_csv_data:
@@ -449,6 +469,24 @@ class ClusterEvaluator:
                         'is_best_in_k': train_data['rank'] == 1,
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
+                elif len(train_row) > 0:
+                    # 只在训练集中存在，无法进行样本外验证
+                    train_data = train_row.iloc[0]
+                    comparison_data.append({
+                        'k_value': k,
+                        'cluster_id': cluster_id,
+                        'train_samples': train_data['count'],
+                        'test_samples': 0,
+                        'train_mean_return': train_data['mean_return'],
+                        'test_mean_return': np.nan,
+                        'train_rank': train_data['rank'],
+                        'test_rank': np.nan,
+                        'overall_return': train_data['mean_return'],
+                        'validation_passed': False,  # 无测试集样本视为未通过验证
+                        'is_best_in_k': train_data['rank'] == 1,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    })
+                # 如果只在测试集中存在或都不存在，则跳过（这种情况不应该发生在正常聚类中）
         
         # 保存聚类比较表
         if comparison_data:
@@ -574,43 +612,65 @@ class ClusterEvaluator:
         # === 计算并保存最佳PC信息（基于训练集历史数据） ===
         print("\n📊 计算最佳PC（基于训练集）...")
         from scipy import stats
-        
-        # 获取训练集的PCA特征列
-        pca_columns = [col for col in train_combined.columns if col.startswith('PC') and '_' in col]
-        if not pca_columns:
-            # 如果没有PC列,则从states_train推断
-            pca_columns = [f'PC{i+1}' for i in range(states_train.shape[1])]
-        
-        # 计算每个PC与future_return_5d的IC（仅用训练集）
-        ic_list = []
-        for i in range(states_train.shape[1]):
-            pc_values = states_train[:, i]
-            ret_values = targets_df.iloc[:len(states_train)]['future_return_5d'].fillna(0).values
-            
-            # T+1对齐：今天的PC预测明天的收益
-            pc_t1 = np.roll(pc_values, 1)
-            pc_t1[0] = 0  # 第一个位置无T+1
-            
-            ic, _ = stats.spearmanr(pc_t1, ret_values)
-            ic_list.append(ic if not np.isnan(ic) else 0.0)
-        
-        # 选择绝对IC最大的PC
-        abs_ic_list = np.abs(ic_list)
-        best_pc_idx = int(np.argmax(abs_ic_list))
-        best_ic = ic_list[best_pc_idx]
-        
+
         pc_metadata = {
-            'best_pc': f'PC{best_pc_idx + 1}',
-            'best_pc_index': best_pc_idx,
-            'pc_direction': 1.0 if best_ic > 0 else -1.0,
-            'pc_threshold': 0.0,  # 可根据需要调整
-            'ic_value': best_ic,
-            'all_ic_values': ic_list,
+            'best_pc': None,
+            'best_pc_index': None,
+            'pc_direction': 1.0,
+            'pc_threshold': 0.0,
+            'threshold_quantile': 0.6,
+            'ic_value': 0.0,
+            'all_ic_values': [],
             'calculated_time': datetime.now().isoformat()
         }
-        
-        print(f"   ✅ 最佳PC: {pc_metadata['best_pc']} (IC={best_ic:.4f})")
-        
+
+        if 'future_return_5d' in targets_df.columns and len(states_train) > 10:
+            ret_values = targets_df.iloc[:len(states_train)]['future_return_5d'].fillna(0).values
+            ic_list = []
+
+            for idx in range(states_train.shape[1]):
+                pc_values = states_train[:, idx]
+                pc_t1 = np.roll(pc_values, 1)
+                pc_t1[0] = 0  # 第一个位置无T+1
+
+                ic, _ = stats.spearmanr(pc_t1, ret_values)
+                ic_list.append(0.0 if np.isnan(ic) else float(ic))
+
+            pc_metadata['all_ic_values'] = ic_list
+
+            if ic_list:
+                abs_ic = np.abs(ic_list)
+                best_pc_idx = int(np.argmax(abs_ic))
+                best_ic = ic_list[best_pc_idx]
+                direction = 1.0 if best_ic >= 0 else -1.0
+
+                strength = states_train[:, best_pc_idx] * direction
+                threshold = float(np.quantile(strength, pc_metadata['threshold_quantile']))
+
+                pc_metadata.update({
+                    'best_pc': f'PC{best_pc_idx + 1}',
+                    'best_pc_index': best_pc_idx,
+                    'pc_direction': direction,
+                    'pc_threshold': threshold,
+                    'ic_value': best_ic
+                })
+
+                print(f"   ✅ 最佳PC: {pc_metadata['best_pc']} (IC={best_ic:.4f}, 门槛={threshold:.4f})")
+            else:
+                print("   ⚠️ 未能计算PC的IC，使用默认PC1")
+        else:
+            print("   ⚠️ 训练数据缺少future_return_5d或样本不足，使用默认PC1")
+
+        # 若未成功确定最佳PC，使用默认配置
+        if pc_metadata['best_pc'] is None:
+            pc_metadata.update({
+                'best_pc': 'PC1',
+                'best_pc_index': 0,
+                'pc_direction': 1.0,
+                'pc_threshold': 0.0,
+                'ic_value': 0.0
+            })
+
         # 保存PC元数据
         pc_metadata_file = os.path.join(self.reports_dir, "pc_metadata.pkl")
         with open(pc_metadata_file, 'wb') as f:
