@@ -21,8 +21,7 @@ if ml_root not in sys.path:
     sys.path.insert(0, ml_root)
 
 # 导入聚类评估模块
-sys.path.insert(0, os.path.join(ml_root, 'evaluation', 'cluster'))
-from cluster_evaluate import main as cluster_main
+from evaluation.cluster.cluster_evaluate import main as cluster_main
 
 
 def load_config(config_path: str) -> dict:

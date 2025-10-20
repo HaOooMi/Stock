@@ -27,8 +27,9 @@ warnings.filterwarnings('ignore')
 
 # 添加项目路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+ml_root = os.path.dirname(current_dir)
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
 
 # 导入模块
 from data.data_loader import DataLoader

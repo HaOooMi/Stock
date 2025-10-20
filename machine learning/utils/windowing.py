@@ -18,11 +18,17 @@ import warnings
 import sys
 import os
 
+# 添加项目路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ml_root = os.path.dirname(current_dir)
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
+
 # 导入特征工程模块
-from feature_engineering import FeatureEngineer
+from features.feature_engineering import FeatureEngineer
 
 # 添加stock_info路径以导入相关模块
-stock_info_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "stock_info")
+stock_info_path = os.path.join(os.path.dirname(ml_root), "stock_info")
 if stock_info_path not in sys.path:
     sys.path.insert(0, stock_info_path)
 

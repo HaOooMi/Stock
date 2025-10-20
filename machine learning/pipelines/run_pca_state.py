@@ -22,8 +22,7 @@ if ml_root not in sys.path:
     sys.path.insert(0, ml_root)
 
 # 导入PCA模块
-sys.path.insert(0, os.path.join(ml_root, 'models', 'transformers'))
-from pca import main as pca_main
+from models.transformers.pca import main as pca_main
 
 
 def load_config(config_path: str) -> dict:

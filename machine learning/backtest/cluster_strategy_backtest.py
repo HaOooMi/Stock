@@ -43,7 +43,7 @@ if project_root not in sys.path:
 # 导入必要模块
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import RobustScaler
-from pca_state import run_complete_feature_pipeline, run_complete_target_pipeline, PCAStateGenerator
+from models.transformers.pca import run_complete_feature_pipeline, run_complete_target_pipeline, PCAStateGenerator
 
 class StrategyBacktest:
     """

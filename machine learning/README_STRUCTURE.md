@@ -40,6 +40,7 @@ machine learning/
 │
 ├── backtest/                   # 回测模块
 │   ├── __init__.py
+│   ├── cluster_stratepy_backtest.py    #聚类信号策略回测
 │   └── top_bucket_backtest.py # Top桶策略回测
 │
 ├── utils/                      # 工具模块
@@ -53,7 +54,6 @@ machine learning/
 │   ├── prepare_data.py        # 完整数据准备流程
 │   ├── run_cluster_analysis.py # 聚类分析
 │   ├── run_pca_state.py       # PCA降维
-│   ├──stratepy_backtest.py    #聚类信号策略回测
 │   └──train_models.py         #机器学习基线训练主脚本
 │
 ├── scripts/                    # 独立脚本

@@ -24,10 +24,8 @@ if ml_root not in sys.path:
     sys.path.insert(0, ml_root)
 
 # 导入特征和目标工程模块
-sys.path.insert(0, os.path.join(ml_root, 'features'))
-sys.path.insert(0, os.path.join(ml_root, 'targets'))
-from feature_engineering import FeatureEngineer
-from target_engineering import TargetEngineer
+from features.feature_engineering import FeatureEngineer
+from targets.target_engineering import TargetEngineer
 
 
 def load_config(config_path: str) -> dict:
