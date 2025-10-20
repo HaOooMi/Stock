@@ -27,10 +27,11 @@ if ml_root not in sys.path:
 # 导入特征工程模块
 from features.feature_engineering import FeatureEngineer
 
-# 添加stock_info路径以导入相关模块
-stock_info_path = os.path.join(os.path.dirname(ml_root), "stock_info")
-if stock_info_path not in sys.path:
-    sys.path.insert(0, stock_info_path)
+# 添加上层目录以导入stock_info模块
+project_root = os.path.dirname(os.path.dirname(ml_root))  # stock/
+get_stock_info_path = os.path.join(project_root, "get_stock_info")
+if get_stock_info_path not in sys.path:
+    sys.path.insert(0, get_stock_info_path)
 
 try:
     import utils

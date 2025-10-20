@@ -66,8 +66,10 @@ def export_stock_data_to_csv(symbol: str, start_date: str = "2022-01-01", end_da
         print(f"✅ 成功获取 {len(df)} 条 {symbol} 数据")
         print(f"📅 数据时间范围: {df['日期'].min().date()} 到 {df['日期'].max().date()}")
         
-        # 创建输出目录
-        os.makedirs(output_dir, exist_ok=True)
+        # 创建输出目录（在当前文件夹内）
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_path_full = os.path.join(script_dir, output_dir)
+        os.makedirs(output_path_full, exist_ok=True)
         
         # 准备VeighNa标准CSV格式数据
         vnpy_df = df.copy()
@@ -108,12 +110,12 @@ def export_stock_data_to_csv(symbol: str, start_date: str = "2022-01-01", end_da
         # 生成文件名
         exchange = 'SZSE' if symbol.startswith('00') or symbol.startswith('30') else 'SSE'
         filename = f"{symbol}.{exchange}_d_{start_date}_{end_date}.csv"
-        output_path = os.path.join(output_dir, filename)
+        csv_output_path = os.path.join(output_path_full, filename)
         
         # 保存CSV文件
-        vnpy_df.to_csv(output_path, index=False, encoding='utf-8')
+        vnpy_df.to_csv(csv_output_path, index=False, encoding='utf-8')
         
-        print(f"✅ 数据已导出到: {output_path}")
+        print(f"✅ 数据已导出到: {csv_output_path}")
         print(f"📊 导出了 {len(vnpy_df)} 条记录")
         
         # 显示数据预览
@@ -122,7 +124,7 @@ def export_stock_data_to_csv(symbol: str, start_date: str = "2022-01-01", end_da
         
         # 显示VeighNa导入说明
         print(f"\n💡 VeighNa导入配置：")
-        print(f"📁 选择文件: {output_path}")
+        print(f"📁 选择文件: {csv_output_path}")
         print(f"🏷️ 代码: {symbol}")
         print(f"🏢 交易所: {exchange}")
         print(f"📅 周期: DAILY (改成DAILY，不是MINUTE)")
@@ -157,14 +159,17 @@ def batch_export_stocks(symbols: list, start_date: str = "2022-01-01", end_date:
             failed_symbols.append(symbol)
     
     print(f"\n{'='*60}")
-    print(f"📊 批量导出结果：")
+    print(f"\n📊 批量导出结果：")
     print(f"✅ 成功: {success_count}/{len(symbols)}")
     print(f"❌ 失败: {len(failed_symbols)}")
     
     if failed_symbols:
         print(f"失败的股票: {', '.join(failed_symbols)}")
     
-    print(f"📁 所有CSV文件保存在: {os.path.abspath(output_dir)}")
+    # 显示完整路径
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    full_output_path = os.path.join(script_dir, output_dir)
+    print(f"📁 所有CSV文件保存在: {full_output_path}")
     print(f"{'='*60}")
 
 
