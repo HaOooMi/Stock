@@ -1,0 +1,182 @@
+# 机器学习基线配置文件
+
+# ===================== 路径配置 =====================
+paths:
+  data_root: "machine learning/ML output"
+  reports_dir: "machine learning/ML output/reports"
+  models_dir: "machine learning/ML output/models"
+  artifacts_dir: "machine learning/ML output/artifacts"
+  states_dir: "machine learning/ML output/states"        # PCA等状态文件
+  figures_dir: "machine learning/ML output/figures"      # 图表输出
+  
+# ===================== 数据配置 =====================
+data:
+  # 股票代码
+  symbol: "000001"
+  
+  # 时间窗口
+  start_date: "2022-01-01"
+  end_date: "2024-12-31"
+  
+  # 数据过滤
+  universe:
+    min_volume: 1000000      # 最小成交量
+    min_price: 1.0           # 最小价格
+    exclude_st: true         # 排除ST股票
+    
+# ===================== 特征配置 =====================
+features:
+  # 特征文件路径（从feature_engineering生成）
+  use_scaled_features: true  # 使用标准化后的特征
+  
+  # 特征预处理
+  preprocessing:
+    winsorize_quantile: [0.01, 0.99]  # 去极值分位数
+    fillna_method: "forward"           # 缺失值填充方法
+    
+# ===================== 目标配置 =====================
+target:
+  # 目标变量名称
+  name: "future_return_5d"
+  
+  # 目标计算参数
+  forward_periods: 5         # 未来收益率窗口（天）
+  return_type: "log"         # 收益率类型：'simple' 或 'log'
+  
+  # 目标处理
+  clip_quantile: [0.01, 0.99]  # 裁剪极端目标值
+  
+# ===================== 数据切分配置 =====================
+split:
+  # 时间切分
+  train_ratio: 0.6           # 训练集比例
+  valid_ratio: 0.2           # 验证集比例
+  test_ratio: 0.2            # 测试集比例
+  
+  # 防泄漏设置
+  purge_days: 10             # 在切分点前后清除的天数
+  embargo_days: 5            # 禁止期天数
+  
+# ===================== 模型配置 =====================
+models:
+  # Ridge回归
+  ridge:
+    enabled: true
+    params:
+      alpha: [0.1, 1.0, 10.0, 100.0]  # 正则化参数网格
+      fit_intercept: true
+      random_state: 42
+      
+  # 随机森林
+  random_forest:
+    enabled: true
+    params:
+      n_estimators: 500
+      max_depth: 10
+      min_samples_leaf: 5
+      min_samples_split: 10
+      max_features: "sqrt"
+      random_state: 42
+      n_jobs: -1
+      
+  # LightGBM
+  lightgbm:
+    enabled: true  # 如果安装失败会自动跳过
+    params:
+      n_estimators: 500
+      learning_rate: 0.05
+      num_leaves: 31
+      max_depth: 8
+      min_data_in_leaf: 20
+      feature_fraction: 0.8
+      bagging_fraction: 0.8
+      bagging_freq: 5
+      lambda_l1: 0.1
+      lambda_l2: 0.1
+      random_state: 42
+      verbose: -1
+      
+# ===================== 评估配置 =====================
+evaluation:
+  # 分桶设置
+  n_buckets: 5               # 分桶数量
+  bucket_method: "quantile"  # 分桶方法：'quantile' 或 'equal_width'
+  daily_bucketing: true      # 按日横截面分桶
+  
+  # 评估指标
+  metrics:
+    - "mse"                  # 均方误差
+    - "mae"                  # 平均绝对误差
+    - "ic"                   # 信息系数
+    - "rank_ic"              # 排序信息系数
+    - "top_bottom_spread"    # Top-Bottom收益差
+    
+  # 报告设置
+  save_predictions: true     # 保存预测明细
+  save_bucket_details: true  # 保存分桶详情
+  generate_plots: false      # 生成可视化图表
+  
+# ===================== 回测配置 =====================
+backtest:
+  # 是否运行回测
+  run_backtest: true
+  
+  # 策略设置
+  strategy:
+    type: "top_bucket"       # 策略类型
+    rebalance_days: 5        # 调仓周期（天）
+    weight_method: "equal"   # 持仓权重：'equal' 或 'weighted'
+    
+  # 交易成本
+  transaction_cost:
+    commission: 0.0003       # 佣金费率（双边）
+    slippage: 0.0010         # 滑点（双边）
+    
+  # 基准对比
+  benchmark:
+    use_equal_weight: true   # 使用全体等权作为基准
+    
+# ===================== 输出配置 =====================
+output:
+  # 主报告文件名
+  bucket_performance: "model_bucket_performance.csv"
+  predictions_file: "test_predictions.csv"
+  summary_file: "summary.json"
+  
+  # 模型持久化
+  save_models: true
+  model_format: "pickle"     # 'pickle' 或 'joblib'
+  
+  # 日志设置
+  log_level: "INFO"          # DEBUG, INFO, WARNING, ERROR
+  log_file: "training.log"
+  
+# ===================== 运行配置 =====================
+runtime:
+  # 随机种子
+  random_seed: 42
+  
+  # 并行设置
+  n_jobs: -1                 # -1表示使用所有CPU核心
+  
+  # 内存控制
+  low_memory_mode: false     # 低内存模式（分块处理）
+  
+  # 缓存设置
+  use_cache: true            # 使用中间结果缓存
+  cache_dir: "machine learning/ML output/cache"
+
+# ===================== PCA配置 =====================
+pca:
+  enabled: false             # 是否启用PCA降维
+  n_components: 0.95         # 保留的方差比例或组件数量
+  save_transformed: true     # 保存降维后的特征
+  
+# ===================== 聚类配置 =====================
+clustering:
+  enabled: false             # 是否运行聚类分析
+  k_range: [4, 5, 6]         # K值范围
+  method: "kmeans"           # 聚类方法
+  by_date: false             # 是否按日期横截面聚类
+  max_iter: 300              # 最大迭代次数
+  random_state: 42           # 随机种子
