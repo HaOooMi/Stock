@@ -72,7 +72,21 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     # 1. 加载配置
     print("\n📋 加载配置...")
     config = load_config(config_path)
+    
+    # 显示项目信息
+    project_info = config.get('project', {})
+    if project_info:
+        print(f"   📦 项目: {project_info.get('name', 'N/A')}")
+        print(f"   📝 描述: {project_info.get('description', 'N/A')}")
+        print(f"   🔖 版本: {project_info.get('version', 'N/A')}")
     print(f"   ✅ 配置加载完成")
+    
+    # 创建输出目录
+    paths = config['paths']
+    for key, path in paths.items():
+        if path and isinstance(path, str) and 'baseline_v1' in path:
+            os.makedirs(path, exist_ok=True)
+    print(f"   📁 输出目录已创建")
     
     # 设置随机种子
     random_seed = config['runtime']['random_seed']
@@ -247,12 +261,22 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     # 8. 保存模型
     if config['output']['save_models']:
         print("\n💾 保存模型...")
-        models_dir = config['paths']['models_dir']
-        os.makedirs(models_dir, exist_ok=True)
         
         for model_name, model in models.items():
-            model_file = os.path.join(models_dir, f"{model_name.lower()}_model.pkl")
+            # 根据模型类型选择保存路径
+            if 'ridge' in model_name.lower():
+                save_dir = config['paths'].get('models_ridge', config['paths']['models_dir'])
+            elif 'forest' in model_name.lower() or 'rf' in model_name.lower():
+                save_dir = config['paths'].get('models_rf', config['paths']['models_dir'])
+            elif 'lgbm' in model_name.lower() or 'lightgbm' in model_name.lower():
+                save_dir = config['paths'].get('models_lgbm', config['paths']['models_dir'])
+            else:
+                save_dir = config['paths']['models_dir']
+            
+            os.makedirs(save_dir, exist_ok=True)
+            model_file = os.path.join(save_dir, f"{model_name.lower()}_model.pkl")
             model.save(model_file, format=config['output']['model_format'])
+            print(f"   ✅ {model_name} 已保存到: {model_file}")
     
     # 9. 生成报告
     print("\n📝 生成报告...")
@@ -270,13 +294,18 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     }
     
     # 生成报告
+    reports_eval_dir = config['paths'].get('reports_evaluation', config['paths']['reports_dir'])
+    os.makedirs(reports_eval_dir, exist_ok=True)
+    
     generate_report(
         report_data,
-        config['paths']['reports_dir'],
+        reports_eval_dir,
         config['output']['bucket_performance'],
         config['output']['predictions_file'],
         config['output']['summary_file']
     )
+    
+    print(f"   📄 报告已保存到: {reports_eval_dir}")
     
     # 10. 总结
     print("\n" + "=" * 70)

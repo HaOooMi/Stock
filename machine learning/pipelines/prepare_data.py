@@ -52,6 +52,18 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     print("\n📋 加载配置...")
     config = load_config(config_path)
     
+    # 显示项目信息
+    project_info = config.get('project', {})
+    if project_info:
+        print(f"   📦 项目: {project_info.get('name', 'N/A')}")
+        print(f"   📝 描述: {project_info.get('description', 'N/A')}")
+    
+    # 创建输出目录
+    datasets_dir = config['paths'].get('datasets_dir', 'machine learning/ML output/datasets')
+    scalers_dir = config['paths'].get('scalers_dir', 'machine learning/ML output/scalers')
+    os.makedirs(datasets_dir, exist_ok=True)
+    os.makedirs(scalers_dir, exist_ok=True)
+    
     symbol = config['data']['symbol']
     start_date = config['data']['start_date']
     end_date = config['data']['end_date']
@@ -84,20 +96,22 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     selected_features = selection_results['final_features_df']
     
     # 特征标准化
+    scaler_path = os.path.join(scalers_dir, f"scaler_{symbol}.pkl")
     scale_results = feature_engineer.scale_features(
         selected_features,
         scaler_type='robust',
         train_ratio=0.8,
-        save_path=f"machine learning/ML output/scaler_{symbol}.pkl"
+        save_path=scaler_path
     )
     
     scaled_features = scale_results['scaled_df']
     
     print(f"   ✅ 特征工程完成: {len(selection_results['final_features'])} 个特征")
+    print(f"   💾 标准化器保存到: {scaler_path}")
     
     # 3. 目标工程
     print("\n🎯 目标工程...")
-    target_engineer = TargetEngineer(data_dir="machine learning/ML output")
+    target_engineer = TargetEngineer(data_dir=datasets_dir)
     
     # 生成目标变量
     complete_df = target_engineer.create_complete_dataset(
