@@ -7,7 +7,7 @@ from influxdb_client.client.query_api import QueryApi
 from typing import List
 from datetime import timezone, timedelta
 
-from utils import parse_unit_value
+from get_stock_info.utils import parse_unit_value
 
 # 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
 #                         ./influxd

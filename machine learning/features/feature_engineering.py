@@ -22,10 +22,16 @@ from typing import Dict, List, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
+# 添加项目根目录到路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ml_root = os.path.dirname(current_dir)
+project_root = os.path.dirname(ml_root)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 # InfluxDB相关
-sys.path.append(r'd:\vscode projects\stock\stock_info')
-from utils import get_influxdb_client
-from stock_market_data_akshare import get_history_data
+from get_stock_info.utils import get_influxdb_client
+from get_stock_info.stock_market_data_akshare import get_history_data
 
 # 机器学习相关 
 from sklearn.feature_selection import VarianceThreshold, SelectKBest, mutual_info_regression

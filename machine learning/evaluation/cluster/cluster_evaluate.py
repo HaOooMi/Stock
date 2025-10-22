@@ -55,12 +55,10 @@ class ClusterEvaluator:
             报告保存目录
         """
         # 设置报告目录
-        self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
         if os.path.isabs(reports_dir):
             self.reports_dir = reports_dir
         else:
-            self.reports_dir = os.path.join(self.project_root, reports_dir)
+            self.reports_dir = os.path.abspath(reports_dir)
         
         # 确保目录存在
         os.makedirs(self.reports_dir, exist_ok=True)
@@ -736,12 +734,23 @@ class ClusterEvaluator:
 
 
 
-def find_latest_files(evaluator):
+def find_latest_files(evaluator, states_dir: str = None, targets_dir: str = None):
     """
     查找最新的PCA状态和目标文件
+    
+    Parameters:
+    -----------
+    evaluator : ClusterEvaluator
+        评估器对象
+    states_dir : str, optional
+        状态文件目录，如果为None则使用默认路径
+    targets_dir : str, optional
+        目标文件目录，如果为None则使用默认路径
     """
-    states_dir = os.path.join(evaluator.project_root, "machine learning/ML output/states")
-    targets_dir = os.path.join(evaluator.project_root, "machine learning/ML output")
+    if states_dir is None:
+        states_dir = os.path.abspath("machine learning/ML output/states/baseline_v1")
+    if targets_dir is None:
+        targets_dir = os.path.abspath("machine learning/ML output")
     
     if not (os.path.exists(states_dir) and os.path.exists(targets_dir)):
         return None, None, None
@@ -769,26 +778,62 @@ def find_latest_files(evaluator):
         return None, None, None
 
 
-def main():
+def main(config: dict = None):
     """
     主函数：聚类+状态收益评估
+    
+    Parameters:
+    -----------
+    config : dict, optional
+        配置字典，如果为None则使用默认配置
     """
     print("="*60)
     print("聚类 + 状态收益评估")
     print("="*60)
     print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # 初始化评估器
-    evaluator = ClusterEvaluator()
+    # 如果没有提供配置，使用默认配置
+    if config is None:
+        config = {
+            'paths': {
+                'reports_clustering': 'machine learning/ML output/reports',
+                'states_dir': 'machine learning/ML output/states'
+            },
+            'clustering': {
+                'k_range': [4, 5, 6],
+                'method': 'kmeans',
+                'random_state': 42
+            }
+        }
     
-    # 查找实际数据文件
-    train_path, test_path, targets_path = find_latest_files(evaluator)
+    # 从配置中提取参数
+    reports_dir = config.get('paths', {}).get('reports_clustering', 'machine learning/ML output/reports/baseline_v1/clustering')
+    states_dir = config.get('paths', {}).get('states_dir', 'machine learning/ML output/states/baseline_v1')
+    k_range = config.get('clustering', {}).get('k_range', [4, 5, 6])
+    random_state = config.get('clustering', {}).get('random_state', 42)
+    
+    print(f"\n📋 配置:")
+    print(f"   reports_dir: {reports_dir}")
+    print(f"   states_dir: {states_dir}")
+    print(f"   k_range: {k_range}")
+    
+    # 初始化评估器（使用配置的目录）
+    evaluator = ClusterEvaluator(reports_dir=reports_dir)
+    evaluator.k_values = k_range
+    evaluator.random_state = random_state
+    
+    # 查找实际数据文件（传入配置的目录）
+    train_path, test_path, targets_path = find_latest_files(
+        evaluator, 
+        states_dir=states_dir,
+        targets_dir=os.path.abspath("machine learning/ML output")
+    )
     
     if train_path is None:
         print("\n❌ 未找到所需的数据文件！")
         print("请确保以下目录存在相应文件：")
-        print(f"  - {os.path.join(evaluator.project_root, 'machine learning/ML output/states')} (states_pca_train_*.npy)")
-        print(f"  - {os.path.join(evaluator.project_root, 'machine learning/ML output')} (with_targets_*.csv)")
+        print(f"  - {states_dir} (states_pca_train_*.npy)")
+        print(f"  - {os.path.abspath('machine learning/ML output')} (with_targets_*.csv)")
         return
     else:
         print(f"\n✅ 找到数据文件:")

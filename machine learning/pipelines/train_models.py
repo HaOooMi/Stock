@@ -85,7 +85,8 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     paths = config['paths']
     for key, path in paths.items():
         if path and isinstance(path, str) and 'baseline_v1' in path:
-            os.makedirs(path, exist_ok=True)
+            abs_path = os.path.abspath(path)
+            os.makedirs(abs_path, exist_ok=True)
     print(f"   📁 输出目录已创建")
     
     # 设置随机种子
@@ -95,7 +96,9 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     
     # 2. 加载数据
     print("\n📊 加载数据...")
-    data_loader = DataLoader(config['paths']['data_root'])
+    # 使用 datasets_dir 作为数据根目录（转换为绝对路径）
+    data_root = os.path.abspath(config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
+    data_loader = DataLoader(data_root)
     
     features, targets = data_loader.load_features_and_targets(
         symbol=config['data']['symbol'],
@@ -106,6 +109,11 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     print(f"   ✅ 数据加载完成")
     print(f"      特征数: {features.shape[1]}")
     print(f"      样本数: {len(features)}")
+    
+    # 检测是否为单股票场景
+    n_symbols = features.index.get_level_values('ticker').nunique()
+    is_cross_section = n_symbols > 1
+    print(f"      股票数: {n_symbols} ({'多股票横截面' if is_cross_section else '单股票时序'})")
     
     # 3. 数据切分
     print("\n📅 数据切分...")
@@ -210,7 +218,8 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
         bucketed = bucket_predictions(
             model_pred,
             n_buckets=config['evaluation']['n_buckets'],
-            method=config['evaluation']['bucket_method']
+            method=config['evaluation']['bucket_method'],
+            cross_section=is_cross_section  # 根据股票数自动选择分桶方式
         )
         
         # 分析桶表现

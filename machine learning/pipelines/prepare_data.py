@@ -58,9 +58,9 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
         print(f"   📦 项目: {project_info.get('name', 'N/A')}")
         print(f"   📝 描述: {project_info.get('description', 'N/A')}")
     
-    # 创建输出目录
-    datasets_dir = config['paths'].get('datasets_dir', 'machine learning/ML output/datasets')
-    scalers_dir = config['paths'].get('scalers_dir', 'machine learning/ML output/scalers')
+    # 创建输出目录（转换为绝对路径）
+    datasets_dir = os.path.abspath(config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
+    scalers_dir = os.path.abspath(config['paths'].get('scalers_dir', 'ML output/scalers/baseline_v1'))
     os.makedirs(datasets_dir, exist_ok=True)
     os.makedirs(scalers_dir, exist_ok=True)
     

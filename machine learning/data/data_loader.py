@@ -53,6 +53,33 @@ class DataLoader:
         print(f"📁 数据加载器初始化")
         print(f"   数据根目录: {self.data_root}")
     
+    def _load_csv_with_encoding(self, file_path: str) -> pd.DataFrame:
+        """
+        尝试多种编码读取CSV文件
+        
+        Parameters:
+        -----------
+        file_path : str
+            文件路径
+            
+        Returns:
+        --------
+        pd.DataFrame
+            读取的数据
+        """
+        encodings = ['utf-8', 'gbk', 'latin1', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                return pd.read_csv(file_path, index_col=0, parse_dates=True, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                if encoding == encodings[-1]:
+                    raise Exception(f"无法读取CSV文件 {file_path}: {str(e)}")
+        
+        raise Exception(f"无法以任何支持的编码读取CSV文件: {file_path}")
+    
     def load_features_and_targets(self, 
                                   symbol: str,
                                   target_col: str = 'future_return_5d',
@@ -76,16 +103,28 @@ class DataLoader:
         """
         print(f"📊 加载数据: {symbol}")
         
+        # 确定根目录（ML output）
+        if 'ML output' in self.data_root:
+            ml_output_root = self.data_root.split('ML output')[0] + 'ML output'
+        else:
+            ml_output_root = self.data_root
+        
         # 1. 加载特征数据
         if use_scaled:
-            # 从scaled_features.csv加载
+            # 标准化特征在 scalers/baseline_v1 目录
+            scalers_dir = os.path.join(ml_output_root, 'scalers', 'baseline_v1')
             feature_pattern = f"scaler_{symbol}_scaled_features.csv"
-            feature_files = [f for f in os.listdir(self.data_root) if f.startswith(f"scaler_{symbol}")]
+            
+            if not os.path.exists(scalers_dir):
+                raise FileNotFoundError(f"标准化器目录不存在: {scalers_dir}")
+            
+            feature_files = [f for f in os.listdir(scalers_dir) 
+                           if f == feature_pattern]
             
             if not feature_files:
-                raise FileNotFoundError(f"未找到标准化特征文件: {feature_pattern}")
+                raise FileNotFoundError(f"未找到标准化特征文件: {feature_pattern} (目录: {scalers_dir})")
             
-            feature_file = os.path.join(self.data_root, feature_files[0])
+            feature_file = os.path.join(scalers_dir, feature_files[0])
             print(f"   📈 加载标准化特征: {feature_files[0]}")
         else:
             # 从with_targets文件加载
@@ -100,21 +139,25 @@ class DataLoader:
             feature_file = os.path.join(self.data_root, target_files[0])
             print(f"   📈 加载特征: {target_files[0]}")
         
-        features_df = pd.read_csv(feature_file, index_col=0, parse_dates=True)
+        # 加载特征数据（尝试多种编码）
+        features_df = self._load_csv_with_encoding(feature_file)
         
-        # 2. 加载目标数据（从with_targets文件）
+        # 2. 加载目标数据（从 datasets 目录）
         target_pattern = f"with_targets_{symbol}_complete_*.csv"
-        target_files = [f for f in os.listdir(self.data_root) if f.startswith(f"with_targets_{symbol}")]
+        
+        target_files = [f for f in os.listdir(self.data_root) 
+                       if f.startswith(f"with_targets_{symbol}_complete_") and f.endswith('.csv')]
         
         if not target_files:
-            raise FileNotFoundError(f"未找到目标文件: {target_pattern}")
+            raise FileNotFoundError(f"未找到目标文件: {target_pattern} (目录: {self.data_root})")
         
         # 使用最新的文件
         target_files.sort(reverse=True)
         target_file = os.path.join(self.data_root, target_files[0])
         print(f"   🎯 加载目标: {target_files[0]}")
         
-        targets_df = pd.read_csv(target_file, index_col=0, parse_dates=True)
+        # 加载目标数据（尝试多种编码）
+        targets_df = self._load_csv_with_encoding(target_file)
         
         # 3. 检查目标列是否存在
         if target_col not in targets_df.columns:

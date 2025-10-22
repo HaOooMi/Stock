@@ -62,17 +62,15 @@ class PCAStateGenerator:
             状态数据保存目录
         """
         # 设置保存目录
-        self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
         if os.path.isabs(models_dir):
             self.models_dir = models_dir
         else:
-            self.models_dir = os.path.join(self.project_root, models_dir)
+            self.models_dir = os.path.abspath(models_dir)
             
         if os.path.isabs(states_dir):
             self.states_dir = states_dir
         else:
-            self.states_dir = os.path.join(self.project_root, states_dir)
+            self.states_dir = os.path.abspath(states_dir)
         
         # 确保目录存在
         os.makedirs(self.models_dir, exist_ok=True)
@@ -699,10 +697,15 @@ def generate_final_summary(feature_results: Dict, target_results: Dict, pca_resu
         print(f"❌ 摘要生成失败: {str(e)}")
         return False
 
-def main():
+def main(config: dict = None):
     """
     主函数 - 完整的股票机器学习预处理流程
     包含：特征工程 → 目标工程 → PCA状态生成
+    
+    Parameters:
+    -----------
+    config : dict, optional
+        配置字典，如果为None则使用默认配置
     """
     print("🚀 股票机器学习完整预处理流程")
     print("=" * 70)
@@ -712,37 +715,74 @@ def main():
     start_time = datetime.now()
     
     try:
-        # 配置参数
-        config = {
-            'symbol': '000001',  # 平安银行
-            'start_date': '2020-01-01',
-            'end_date': '2022-12-31',
-            'use_auto_features': True,  # 是否使用自动特征生成
-            'final_k_features': 15,      # 最终特征数量
-            'target_periods': [1, 5, 10], # 目标时间窗口
-            'pca_components': 0.9,       # PCA解释方差比例
-            'train_ratio': 0.8           # 训练集比例
-        }
+        # 如果没有提供配置，使用默认配置
+        if config is None:
+            config = {
+                'data': {
+                    'symbol': '000001',
+                    'start_date': '2020-01-01',
+                    'end_date': '2022-12-31'
+                },
+                'features': {
+                    'use_auto_features': True,
+                    'final_k_features': 15
+                },
+                'target': {
+                    'periods': [1, 5, 10]
+                },
+                'pca': {
+                    'n_components': 0.9
+                },
+                'split': {
+                    'train_ratio': 0.8
+                },
+                'paths': {
+                    'models_pca': 'machine learning/ML output/models',
+                    'states_dir': 'machine learning/ML output/states'
+                }
+            }
+        
+        # 从配置中提取参数
+        symbol = config.get('data', {}).get('symbol', '000001')
+        start_date = config.get('data', {}).get('start_date', '2020-01-01')
+        end_date = config.get('data', {}).get('end_date', '2022-12-31')
+        use_auto_features = config.get('features', {}).get('use_auto_features', True)
+        final_k_features = config.get('features', {}).get('final_k_features', 15)
+        target_periods = config.get('target', {}).get('periods', [1, 5, 10])
+        pca_components = config.get('pca', {}).get('n_components', 0.9)
+        train_ratio = config.get('split', {}).get('train_ratio', 0.8)
+        
+        # 输出目录
+        models_dir = config.get('paths', {}).get('models_pca', 'machine learning/ML output/models/baseline_v1/pca')
+        states_dir = config.get('paths', {}).get('states_dir', 'machine learning/ML output/states/baseline_v1')
         
         print("📋 执行配置:")
-        for key, value in config.items():
-            print(f"   {key}: {value}")
+        print(f"   symbol: {symbol}")
+        print(f"   start_date: {start_date}")
+        print(f"   end_date: {end_date}")
+        print(f"   use_auto_features: {use_auto_features}")
+        print(f"   final_k_features: {final_k_features}")
+        print(f"   target_periods: {target_periods}")
+        print(f"   pca_components: {pca_components}")
+        print(f"   train_ratio: {train_ratio}")
+        print(f"   models_dir: {models_dir}")
+        print(f"   states_dir: {states_dir}")
         print()
         
         # 确保输出目录存在
-        os.makedirs("machine learning/ML output/models", exist_ok=True)
-        os.makedirs("machine learning/ML output/states", exist_ok=True)
+        os.makedirs(models_dir, exist_ok=True)
+        os.makedirs(states_dir, exist_ok=True)
         
         success_steps = 0
         total_steps = 3
         
         # === 步骤1: 特征工程 ===
         feature_results = run_complete_feature_pipeline(
-            symbol=config['symbol'],
-            start_date=config['start_date'],
-            end_date=config['end_date'],
-            use_auto_features=config['use_auto_features'],
-            final_k_features=config['final_k_features']
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            use_auto_features=use_auto_features,
+            final_k_features=final_k_features
         )
         
         if feature_results.get('success'):
@@ -755,8 +795,8 @@ def main():
         # === 步骤2: 目标变量工程 ===
         target_results = run_complete_target_pipeline(
             scaled_features_df=feature_results['scaled_features_df'],
-            symbol=config['symbol'],
-            target_periods=config['target_periods']
+            symbol=symbol,
+            target_periods=target_periods
         )
         
         if target_results.get('success'):
@@ -777,15 +817,18 @@ def main():
             if not csv_path or not os.path.exists(csv_path):
                 print("⚠️ 标准化特征CSV文件不存在，跳过PCA步骤")
             else:
-                # 初始化PCA状态生成器
-                pca_generator = PCAStateGenerator()
+                # 初始化PCA状态生成器（使用配置的目录）
+                pca_generator = PCAStateGenerator(
+                    models_dir=models_dir,
+                    states_dir=states_dir
+                )
                 
                 # 生成PCA状态
                 pca_results = pca_generator.generate_pca_states(
                     csv_path=csv_path,
-                    symbol=config['symbol'],
-                    n_components=config['pca_components'],
-                    train_ratio=config['train_ratio']
+                    symbol=symbol,
+                    n_components=pca_components,
+                    train_ratio=train_ratio
                 )
                 
                 if pca_results and 'n_components' in pca_results:
@@ -810,7 +853,7 @@ def main():
         
         if success_steps >= 2:  # 至少特征工程和目标工程成功
             print("\n🎊 核心流程成功完成！")
-            print("📁 所有结果文件已保存到: machine learning/ML output/")
+            print(f"📁 所有结果文件已保存到: {models_dir} 和 {states_dir}")
             print("✨ 现在可以开始机器学习建模了")
             return True
         else:

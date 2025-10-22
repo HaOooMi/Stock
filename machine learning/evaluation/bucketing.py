@@ -11,9 +11,10 @@ from typing import Dict, Optional
 
 def bucket_predictions(predictions_df: pd.DataFrame,
                       n_buckets: int = 5,
-                      method: str = 'quantile') -> pd.DataFrame:
+                      method: str = 'quantile',
+                      cross_section: bool = True) -> pd.DataFrame:
     """
-    按日横截面对预测进行分桶
+    对预测进行分桶
     
     Parameters:
     -----------
@@ -23,39 +24,63 @@ def bucket_predictions(predictions_df: pd.DataFrame,
         分桶数量
     method : str
         分桶方法: 'quantile'(等分位) 或 'equal_width'(等宽)
+    cross_section : bool
+        True: 按日横截面分桶（多股票场景）
+        False: 全局分桶（单股票或时间序列场景）
         
     Returns:
     --------
     pd.DataFrame
         包含bucket列的预测数据
     """
-    print(f"📊 按日横截面分{n_buckets}桶 (方法: {method})")
+    if cross_section:
+        print(f"📊 按日横截面分{n_buckets}桶 (方法: {method})")
+    else:
+        print(f"📊 全局分{n_buckets}桶 (方法: {method})")
     
     result_df = predictions_df.copy()
     result_df['bucket'] = np.nan
     
-    dates = result_df.index.get_level_values('date').unique()
-    
-    for date in dates:
-        # 获取当日数据
-        date_mask = result_df.index.get_level_values('date') == date
-        date_predictions = result_df.loc[date_mask, 'y_pred']
+    if not cross_section:
+        # 全局分桶（适合单股票场景）
+        if len(result_df) < n_buckets:
+            print(f"   ⚠️  样本数({len(result_df)}) < 桶数({n_buckets})，无法分桶")
+            return result_df
         
-        if len(date_predictions) < n_buckets:
-            # 样本数不足，跳过
-            continue
-        
-        # 分桶
+        # 对所有预测值进行分桶
         if method == 'quantile':
-            # 等分位分桶
-            buckets = pd.qcut(date_predictions, q=n_buckets, labels=False, duplicates='drop')
+            buckets = pd.qcut(result_df['y_pred'], q=n_buckets, labels=False, duplicates='drop')
         elif method == 'equal_width':
-            # 等宽分桶
-            buckets = pd.cut(date_predictions, bins=n_buckets, labels=False)
+            buckets = pd.cut(result_df['y_pred'], bins=n_buckets, labels=False)
         else:
             raise ValueError(f"不支持的分桶方法: {method}")
         
-        result_df.loc[date_mask, 'bucket'] = buckets
+        result_df['bucket'] = buckets
+        
+    else:
+        # 按日横截面分桶（适合多股票场景）
+        dates = result_df.index.get_level_values('date').unique()
+        
+        for date in dates:
+            # 获取当日数据
+            date_mask = result_df.index.get_level_values('date') == date
+            date_predictions = result_df.loc[date_mask, 'y_pred']
+            
+            if len(date_predictions) < n_buckets:
+                # 样本数不足，跳过
+                continue
+            
+            # 分桶
+            if method == 'quantile':
+                # 等分位分桶
+                buckets = pd.qcut(date_predictions, q=n_buckets, labels=False, duplicates='drop')
+            elif method == 'equal_width':
+                # 等宽分桶
+                buckets = pd.cut(date_predictions, bins=n_buckets, labels=False)
+            else:
+                raise ValueError(f"不支持的分桶方法: {method}")
+            
+            result_df.loc[date_mask, 'bucket'] = buckets
     
     # 统计分桶结果
     valid_buckets = result_df['bucket'].notna().sum()

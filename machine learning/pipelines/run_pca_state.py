@@ -32,29 +32,31 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-def main(config_path: str = None):
+def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     """
     PCA降维主流程
     
     Parameters:
     -----------
-    config_path : str, optional
+    config_path : str
         配置文件路径
     """
     print("=" * 70)
     print("🔄 PCA降维分析运行")
     print("=" * 70)
     
-    # 加载配置（如果提供）
-    if config_path:
-        config = load_config(config_path)
-        print(f"\n📋 使用配置文件: {config_path}")
-    else:
-        print(f"\n📋 使用默认配置")
+    # 加载配置
+    config = load_config(config_path)
+    print(f"\n📋 使用配置文件: {config_path}")
     
-    # 调用PCA主函数
+    # 显示项目信息
+    project_info = config.get('project', {})
+    if project_info:
+        print(f"   📦 项目: {project_info.get('name', 'N/A')}")
+    
+    # 调用PCA主函数，传入配置
     print("\n🚀 开始PCA降维...")
-    pca_main()
+    pca_main(config)
     
     print("\n" + "=" * 70)
     print("✅ PCA降维完成！")
@@ -64,8 +66,8 @@ def main(config_path: str = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PCA降维运行脚本')
     parser.add_argument('--config', type=str, 
-                       default=None,
-                       help='配置文件路径（可选）')
+                       default='machine learning/configs/ml_baseline.yml',
+                       help='配置文件路径')
     
     args = parser.parse_args()
     
