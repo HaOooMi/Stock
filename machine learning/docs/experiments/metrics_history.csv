@@ -1,0 +1,4 @@
+exp_id,date,symbol,universe,rank_ic_train,rank_ic_test,spread_train,spread_test,sharpe,max_dd,icir_train,icir_test,ic_win_rate,validation_passed,notes
+# 实验指标历史记录
+# 用于统计分布并确定验收阈值
+# 每次实验后自动追加一行（或手动记录）

@@ -156,10 +156,11 @@ backtest:
     rebalance_days: 5        # 调仓周期（天）
     weight_method: "equal"   # 持仓权重：'equal' 或 'weighted'
     
-  # 交易成本
+  # 交易成本（统一配置，回测模块必须读取此参数）
   transaction_cost:
-    commission: 0.0003       # 佣金费率（双边）
-    slippage: 0.0010         # 滑点（双边）
+    commission: 0.0003       # 佣金费率（双边，0.03%）
+    slippage: 0.0010         # 滑点（双边，0.10%）
+    # 总成本约 = (commission + slippage) × 2 = 0.26% 每回合
     
   # 基准对比
   benchmark:
