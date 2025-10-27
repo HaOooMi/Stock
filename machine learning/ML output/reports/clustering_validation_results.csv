@@ -1,4 +1,0 @@
-k_value,silhouette_score,calinski_score,train_difference,train_significant,test_best_cluster_rank,test_top_50_percent,overall_valid
-4,0.2320674034848629,119.460329143969,0.03131852117426585,True,3.0,False,False
-5,0.21001746627382836,122.34350012028831,0.044992395572951496,True,4.0,False,False
-6,0.2200334341082687,116.51357364993612,0.04401652478718234,True,,False,False
