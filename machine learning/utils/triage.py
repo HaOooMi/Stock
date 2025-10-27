@@ -50,7 +50,7 @@ class QuickTriage:
     在进入复杂的机器学习模型之前,快速诊断信号质量和策略转换问题
     """
     
-    def __init__(self, reports_dir: str = "machine learning/ML output/reports"):
+    def __init__(self, reports_dir: str = "ML output/reports"):
         """初始化体检系统"""
         self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         

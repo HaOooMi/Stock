@@ -47,11 +47,29 @@ data:
   start_date: "2022-01-01"
   end_date: "2024-12-31"
   
-  # 数据过滤
+  # 数据快照（版本化）
+  snapshot:
+    enabled: true                    # 是否启用快照管理
+    save_parquet: true              # 是否保存为Parquet格式
+    auto_generate_id: true          # 自动生成快照ID（如ds_2025Q4_v1）
+    
+  # 数据过滤（交易可行性）
   universe:
-    min_volume: 1000000      # 最小成交量
-    min_price: 1.0           # 最小价格
-    exclude_st: true         # 排除ST股票
+    min_volume: 1000000             # 最小成交量
+    min_amount: 50000000            # 最小成交额（5000万）
+    min_price: 1.0                  # 最小价格
+    min_turnover: 0.002             # 最小换手率（0.2%）
+    min_listing_days: 60            # 最小上市天数
+    exclude_st: true                # 排除ST股票
+    exclude_limit_moves: true       # 排除涨跌停
+    limit_threshold: 0.095          # 涨跌停阈值（9.5%）
+    
+  # Point-in-Time (PIT) 对齐
+  pit:
+    enabled: true                   # 是否启用PIT对齐
+    financial_lag_days: 90          # 财务数据滞后天数
+    use_adj_factor: true            # 使用后复权因子
+    validate_alignment: true        # 验证PIT对齐
     
 # ===================== 特征配置 =====================
 features:

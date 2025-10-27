@@ -29,9 +29,10 @@ from sklearn.preprocessing import StandardScaler
 # 添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # models/transformers/ -> models/ -> machine learning/
-project_root = os.path.dirname(os.path.dirname(current_dir))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+ml_root = os.path.dirname(os.path.dirname(current_dir))
+project_root = os.path.dirname(ml_root)
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
 
 # 导入特征工程和目标工程
 from features.feature_engineering import FeatureEngineer
@@ -49,8 +50,8 @@ class PCAStateGenerator:
     4. 解释方差验证
     """
     
-    def __init__(self, models_dir: str = "machine learning/ML output/models",
-                 states_dir: str = "machine learning/ML output/states"):
+    def __init__(self, models_dir: str = "ML output/models",
+                 states_dir: str = "ML output/states"):
         """
         初始化PCA状态生成器
         
@@ -65,12 +66,12 @@ class PCAStateGenerator:
         if os.path.isabs(models_dir):
             self.models_dir = models_dir
         else:
-            self.models_dir = os.path.abspath(models_dir)
+            self.models_dir = os.path.join(ml_root, models_dir)
             
         if os.path.isabs(states_dir):
             self.states_dir = states_dir
         else:
-            self.states_dir = os.path.abspath(states_dir)
+            self.states_dir = os.path.join(ml_root, states_dir)
         
         # 确保目录存在
         os.makedirs(self.models_dir, exist_ok=True)
@@ -410,7 +411,8 @@ def run_complete_feature_pipeline(symbol: str = '000001',
                                   start_date: str = '2023-01-01', 
                                   end_date: str = '2024-12-31',
                                   use_auto_features: bool = False,
-                                  final_k_features: int = 15) -> Dict:
+                                  final_k_features: int = 15,
+                                  scalers_dir: str = None) -> Dict:
     """
     运行完整的特征工程管道
     
@@ -469,11 +471,17 @@ def run_complete_feature_pipeline(symbol: str = '000001',
         
         # 特征标准化
         print("📏 执行特征标准化...")
+        # 构建scaler路径
+        if scalers_dir:
+            save_path = os.path.join(scalers_dir, f'scaler_{symbol}.pkl')
+        else:
+            save_path = os.path.join(ml_root, f'ML output/scalers/baseline_v1/scaler_{symbol}.pkl')
+        
         scale_results = feature_engineer.scale_features(
             final_features_df,
             scaler_type='robust',
             train_ratio=0.8,
-            save_path=f'machine learning/ML output/scaler_{symbol}.pkl'
+            save_path=save_path
         )
         
         scaled_features_df = scale_results['scaled_df']
@@ -505,7 +513,8 @@ def run_complete_feature_pipeline(symbol: str = '000001',
 
 def run_complete_target_pipeline(scaled_features_df: pd.DataFrame, 
                                 symbol: str = 'stock',
-                                target_periods: list = [1, 5, 10]) -> Dict:
+                                target_periods: list = [1, 5, 10],
+                                data_dir: str = None) -> Dict:
     """
     运行完整的目标变量工程管道
     
@@ -517,6 +526,8 @@ def run_complete_target_pipeline(scaled_features_df: pd.DataFrame,
         股票代码
     target_periods : list
         目标时间窗口
+    data_dir : str, optional
+        数据保存目录，如果为None则使用默认值
         
     Returns:
     --------
@@ -528,7 +539,10 @@ def run_complete_target_pipeline(scaled_features_df: pd.DataFrame,
     
     try:
         # 初始化目标工程器
-        target_engineer = TargetEngineer()
+        if data_dir:
+            target_engineer = TargetEngineer(data_dir=data_dir)
+        else:
+            target_engineer = TargetEngineer()
         
         # 创建完整数据集（特征 + 目标）
         print("🔨 创建完整数据集...")
@@ -639,7 +653,7 @@ def generate_final_summary(feature_results: Dict, target_results: Dict, pca_resu
             summary_lines.append("")
         
         # 文件统计
-        ml_output_dir = os.path.join("machine learning", "ML output")
+        ml_output_dir = os.path.join(ml_root, "ML output")
         summary_lines.append("📁 生成文件统计:")
         
         try:
@@ -684,9 +698,10 @@ def generate_final_summary(feature_results: Dict, target_results: Dict, pca_resu
         summary_text = "\n".join(summary_lines)
         print(summary_text)
         
-        # 保存摘要到文件
-        os.makedirs(ml_output_dir, exist_ok=True)
-        summary_path = os.path.join(ml_output_dir, f'pipeline_summary_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt')
+        # 保存摘要到文件 - 保存到 reports 目录
+        reports_dir = os.path.join(ml_root, "ML output/reports/baseline_v1")
+        os.makedirs(reports_dir, exist_ok=True)
+        summary_path = os.path.join(reports_dir, f'pipeline_summary_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt')
         with open(summary_path, 'w', encoding='utf-8') as f:
             f.write(summary_text)
         
@@ -737,8 +752,8 @@ def main(config: dict = None):
                     'train_ratio': 0.8
                 },
                 'paths': {
-                    'models_pca': 'machine learning/ML output/models',
-                    'states_dir': 'machine learning/ML output/states'
+                    'models_pca': 'ML output/models',
+                    'states_dir': 'ML output/states'
                 }
             }
         
@@ -753,8 +768,8 @@ def main(config: dict = None):
         train_ratio = config.get('split', {}).get('train_ratio', 0.8)
         
         # 输出目录
-        models_dir = config.get('paths', {}).get('models_pca', 'machine learning/ML output/models/baseline_v1/pca')
-        states_dir = config.get('paths', {}).get('states_dir', 'machine learning/ML output/states/baseline_v1')
+        models_dir = config.get('paths', {}).get('models_pca', 'ML output/models/baseline_v1/pca')
+        states_dir = config.get('paths', {}).get('states_dir', 'ML output/states/baseline_v1')
         
         print("📋 执行配置:")
         print(f"   symbol: {symbol}")
@@ -777,12 +792,18 @@ def main(config: dict = None):
         total_steps = 3
         
         # === 步骤1: 特征工程 ===
+        # 从配置中获取 scalers_dir
+        scalers_dir_cfg = config.get('paths', {}).get('scalers_dir', 'ML output/scalers/baseline_v1')
+        if not os.path.isabs(scalers_dir_cfg):
+            scalers_dir_cfg = os.path.join(ml_root, scalers_dir_cfg)
+        
         feature_results = run_complete_feature_pipeline(
             symbol=symbol,
             start_date=start_date,
             end_date=end_date,
             use_auto_features=use_auto_features,
-            final_k_features=final_k_features
+            final_k_features=final_k_features,
+            scalers_dir=scalers_dir_cfg
         )
         
         if feature_results.get('success'):
@@ -793,10 +814,16 @@ def main(config: dict = None):
             return False
         
         # === 步骤2: 目标变量工程 ===
+        # 从配置中获取 datasets_dir
+        datasets_dir = config.get('paths', {}).get('datasets_dir', 'ML output/datasets/baseline_v1')
+        if not os.path.isabs(datasets_dir):
+            datasets_dir = os.path.join(ml_root, datasets_dir)
+        
         target_results = run_complete_target_pipeline(
             scaled_features_df=feature_results['scaled_features_df'],
             symbol=symbol,
-            target_periods=target_periods
+            target_periods=target_periods,
+            data_dir=datasets_dir
         )
         
         if target_results.get('success'):

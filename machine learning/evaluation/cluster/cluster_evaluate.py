@@ -29,9 +29,10 @@ from sklearn.metrics import silhouette_score, calinski_harabasz_score
 # 添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # evaluation/cluster/ -> evaluation/ -> machine learning/
-project_root = os.path.dirname(os.path.dirname(current_dir))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+ml_root = os.path.dirname(os.path.dirname(current_dir))
+project_root = os.path.dirname(ml_root)
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
 
 
 class ClusterEvaluator:
@@ -45,7 +46,7 @@ class ClusterEvaluator:
     4. 验证聚类的预测能力
     """
     
-    def __init__(self, reports_dir: str = "machine learning/ML output/reports"):
+    def __init__(self, reports_dir: str = "ML output/reports"):
         """
         初始化聚类评估器
         
@@ -58,7 +59,7 @@ class ClusterEvaluator:
         if os.path.isabs(reports_dir):
             self.reports_dir = reports_dir
         else:
-            self.reports_dir = os.path.abspath(reports_dir)
+            self.reports_dir = os.path.join(ml_root, reports_dir)
         
         # 确保目录存在
         os.makedirs(self.reports_dir, exist_ok=True)
@@ -748,9 +749,9 @@ def find_latest_files(evaluator, states_dir: str = None, targets_dir: str = None
         目标文件目录，如果为None则使用默认路径
     """
     if states_dir is None:
-        states_dir = os.path.abspath("machine learning/ML output/states/baseline_v1")
+        states_dir = os.path.join(ml_root, "ML output/states/baseline_v1")
     if targets_dir is None:
-        targets_dir = os.path.abspath("machine learning/ML output")
+        targets_dir = os.path.join(ml_root, "ML output/datasets/baseline_v1")
     
     if not (os.path.exists(states_dir) and os.path.exists(targets_dir)):
         return None, None, None
@@ -796,8 +797,8 @@ def main(config: dict = None):
     if config is None:
         config = {
             'paths': {
-                'reports_clustering': 'machine learning/ML output/reports',
-                'states_dir': 'machine learning/ML output/states'
+                'reports_clustering': 'ML output/reports',
+                'states_dir': 'ML output/states'
             },
             'clustering': {
                 'k_range': [4, 5, 6],
@@ -807,10 +808,16 @@ def main(config: dict = None):
         }
     
     # 从配置中提取参数
-    reports_dir = config.get('paths', {}).get('reports_clustering', 'machine learning/ML output/reports/baseline_v1/clustering')
-    states_dir = config.get('paths', {}).get('states_dir', 'machine learning/ML output/states/baseline_v1')
+    reports_dir = config.get('paths', {}).get('reports_clustering', 'ML output/reports/baseline_v1/clustering')
+    states_dir = config.get('paths', {}).get('states_dir', 'ML output/states/baseline_v1')
     k_range = config.get('clustering', {}).get('k_range', [4, 5, 6])
     random_state = config.get('clustering', {}).get('random_state', 42)
+    
+    # 转换相对路径为绝对路径
+    if not os.path.isabs(reports_dir):
+        reports_dir = os.path.join(ml_root, reports_dir)
+    if not os.path.isabs(states_dir):
+        states_dir = os.path.join(ml_root, states_dir)
     
     print(f"\n📋 配置:")
     print(f"   reports_dir: {reports_dir}")
@@ -826,14 +833,14 @@ def main(config: dict = None):
     train_path, test_path, targets_path = find_latest_files(
         evaluator, 
         states_dir=states_dir,
-        targets_dir=os.path.abspath("machine learning/ML output")
+        targets_dir=os.path.join(ml_root, "ML output/datasets/baseline_v1")
     )
     
     if train_path is None:
         print("\n❌ 未找到所需的数据文件！")
         print("请确保以下目录存在相应文件：")
         print(f"  - {states_dir} (states_pca_train_*.npy)")
-        print(f"  - {os.path.abspath('machine learning/ML output')} (with_targets_*.csv)")
+        print(f"  - {os.path.join(ml_root, 'ML output/datasets/baseline_v1')} (with_targets_*.csv)")
         return
     else:
         print(f"\n✅ 找到数据文件:")

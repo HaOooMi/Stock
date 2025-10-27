@@ -8,13 +8,16 @@
 2. 加载目标变量数据
 3. 统一返回MultiIndex [date, ticker]格式
 4. 数据对齐与清洗
+5. 集成数据快照管理
+6. 集成交易可行性过滤
+7. 集成PIT数据对齐
 """
 
 import os
 import sys
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -25,18 +28,43 @@ project_root = os.path.dirname(ml_root)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# 导入新模块
+try:
+    from data.data_snapshot import DataSnapshot
+    from data.tradability_filter import TradabilityFilter
+    from data.pit_aligner import PITDataAligner
+except ImportError:
+    # 如果模块未找到，尝试相对导入
+    try:
+        from data_snapshot import DataSnapshot
+        from tradability_filter import TradabilityFilter
+        from pit_aligner import PITDataAligner
+    except ImportError:
+        print("⚠️  警告: 无法导入数据清洗模块，部分功能可能不可用")
+        DataSnapshot = None
+        TradabilityFilter = None
+        PITDataAligner = None
+
 
 class DataLoader:
     """
-    数据加载器类
+    数据加载器类（增强版）
     
     功能：
     1. 加载特征和目标数据
     2. 数据对齐与清洗
     3. 统一格式为MultiIndex
+    4. 数据快照管理
+    5. 交易可行性过滤
+    6. PIT数据对齐
     """
     
-    def __init__(self, data_root: str = "machine learning/ML output"):
+    def __init__(self, 
+                 data_root: str = "ML output",
+                 enable_snapshot: bool = True,
+                 enable_filtering: bool = True,
+                 enable_pit_alignment: bool = True,
+                 filter_config: Optional[Dict[str, Any]] = None):
         """
         初始化数据加载器
         
@@ -44,14 +72,47 @@ class DataLoader:
         -----------
         data_root : str
             数据根目录
+        enable_snapshot : bool
+            是否启用快照管理
+        enable_filtering : bool
+            是否启用交易可行性过滤
+        enable_pit_alignment : bool
+            是否启用PIT对齐
+        filter_config : dict, optional
+            过滤器配置
         """
         if os.path.isabs(data_root):
             self.data_root = data_root
         else:
-            self.data_root = os.path.join(project_root, data_root)
+            self.data_root = os.path.join(ml_root, data_root)
         
-        print(f"📁 数据加载器初始化")
+        # 功能开关
+        self.enable_snapshot = enable_snapshot
+        self.enable_filtering = enable_filtering
+        self.enable_pit_alignment = enable_pit_alignment
+        
+        # 初始化子模块
+        if enable_snapshot and DataSnapshot is not None:
+            self.snapshot_mgr = DataSnapshot(output_dir=self.data_root)
+        else:
+            self.snapshot_mgr = None
+        
+        if enable_filtering and TradabilityFilter is not None:
+            filter_config = filter_config or {}
+            self.filter_engine = TradabilityFilter(**filter_config)
+        else:
+            self.filter_engine = None
+        
+        if enable_pit_alignment and PITDataAligner is not None:
+            self.pit_aligner = PITDataAligner()
+        else:
+            self.pit_aligner = None
+        
+        print(f"📁 数据加载器初始化（增强版）")
         print(f"   数据根目录: {self.data_root}")
+        print(f"   快照管理: {'✅' if enable_snapshot else '❌'}")
+        print(f"   交易过滤: {'✅' if enable_filtering else '❌'}")
+        print(f"   PIT对齐: {'✅' if enable_pit_alignment else '❌'}")
     
     def _load_csv_with_encoding(self, file_path: str) -> pd.DataFrame:
         """
@@ -297,6 +358,169 @@ class DataLoader:
         
         print(f"   📋 从数据文件提取特征列表: {len(features)} 个特征")
         return features
+    
+    def load_with_snapshot(self,
+                          symbol: str,
+                          start_date: str,
+                          end_date: str,
+                          target_col: str = 'future_return_5d',
+                          use_scaled: bool = True,
+                          filters: Optional[Dict[str, Any]] = None,
+                          random_seed: int = 42,
+                          save_parquet: bool = True) -> Tuple[pd.DataFrame, pd.Series, str]:
+        """
+        加载数据并创建快照（推荐使用）
+        
+        Parameters:
+        -----------
+        symbol : str
+            股票代码
+        start_date : str
+            开始日期
+        end_date : str
+            结束日期
+        target_col : str
+            目标列名
+        use_scaled : bool
+            是否使用标准化特征
+        filters : dict, optional
+            过滤参数
+        random_seed : int
+            随机种子
+        save_parquet : bool
+            是否保存为Parquet
+            
+        Returns:
+        --------
+        Tuple[pd.DataFrame, pd.Series, str]
+            (特征数据, 目标数据, 快照ID)
+        """
+        print(f"\n{'='*60}")
+        print(f"📊 加载数据并创建快照")
+        print(f"{'='*60}")
+        
+        # 1. 加载原始数据
+        features, targets = self.load_features_and_targets(
+            symbol=symbol,
+            target_col=target_col,
+            use_scaled=use_scaled
+        )
+        
+        # 2. 应用交易可行性过滤
+        if self.enable_filtering and self.filter_engine is not None:
+            # 合并特征和目标以便过滤
+            combined_data = features.copy()
+            combined_data[target_col] = targets
+            
+            # 应用过滤
+            filter_log_path = os.path.join(
+                self.data_root, 
+                'datasets', 
+                'baseline_v1', 
+                f'filter_log_{symbol}.csv'
+            )
+            
+            filtered_data, filter_log = self.filter_engine.apply_filters(
+                combined_data,
+                save_log=True,
+                log_path=filter_log_path
+            )
+            
+            # 提取可交易样本
+            tradable_mask = filtered_data['tradable_flag'] == 1
+            features = filtered_data[tradable_mask][features.columns]
+            targets = filtered_data[tradable_mask][target_col]
+            
+            print(f"\n   ✅ 交易过滤完成: {len(features)} 个可交易样本")
+        
+        # 3. PIT对齐验证
+        if self.enable_pit_alignment and self.pit_aligner is not None:
+            combined_data = features.copy()
+            combined_data[target_col] = targets
+            
+            pit_results = self.pit_aligner.validate_pit_alignment(
+                combined_data,
+                target_col=target_col
+            )
+            
+            if not pit_results.get('overall_pass', False):
+                print(f"   ⚠️  警告: PIT对齐验证未通过")
+        
+        # 4. 创建数据快照
+        snapshot_id = None
+        if self.enable_snapshot and self.snapshot_mgr is not None:
+            # 准备快照数据
+            snapshot_data = features.copy()
+            snapshot_data[target_col] = targets
+            
+            # 过滤参数
+            filters = filters or {
+                'min_volume': getattr(self.filter_engine, 'min_volume', None) if self.filter_engine else None,
+                'min_price': getattr(self.filter_engine, 'min_price', None) if self.filter_engine else None,
+                'exclude_st': getattr(self.filter_engine, 'exclude_st', None) if self.filter_engine else None
+            }
+            
+            # 创建快照
+            snapshot_path = self.snapshot_mgr.create_snapshot(
+                data=snapshot_data,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                filters=filters,
+                random_seed=random_seed,
+                save_parquet=save_parquet
+            )
+            
+            snapshot_id = self.snapshot_mgr.snapshot_id
+            print(f"\n   ✅ 数据快照创建完成: {snapshot_id}")
+        
+        print(f"\n{'='*60}")
+        print(f"✅ 数据加载完成")
+        print(f"{'='*60}")
+        print(f"   特征数量: {len(features.columns)}")
+        print(f"   样本数量: {len(features)}")
+        print(f"   快照ID: {snapshot_id or 'N/A'}")
+        print(f"{'='*60}\n")
+        
+        return features, targets, snapshot_id
+    
+    def load_from_snapshot(self, snapshot_id: str) -> Tuple[pd.DataFrame, pd.Series]:
+        """
+        从快照加载数据
+        
+        Parameters:
+        -----------
+        snapshot_id : str
+            快照ID
+            
+        Returns:
+        --------
+        Tuple[pd.DataFrame, pd.Series]
+            (特征数据, 目标数据)
+        """
+        if self.snapshot_mgr is None:
+            raise RuntimeError("快照管理器未启用")
+        
+        # 加载快照
+        data, metadata = self.snapshot_mgr.load_snapshot(snapshot_id)
+        
+        # 分离特征和目标
+        target_col = metadata.get('target_col', 'future_return_5d')
+        
+        # 如果目标列在数据中
+        if target_col in data.columns:
+            targets = data[target_col]
+            features = data.drop(columns=[target_col])
+        else:
+            # 否则假设所有列都是特征
+            features = data
+            targets = pd.Series(index=data.index, dtype=float)
+        
+        print(f"✅ 从快照加载数据: {snapshot_id}")
+        print(f"   特征数量: {len(features.columns)}")
+        print(f"   样本数量: {len(features)}")
+        
+        return features, targets
 
 
 if __name__ == "__main__":

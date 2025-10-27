@@ -1,0 +1,15 @@
+rolling_std_30d
+atr_14
+auto_close__maximum
+auto_volume__minimum
+macd_hist
+macd
+rolling_std_20d
+volume_ma_5
+kurtosis_20d
+skewness_20d
+auto_volume__maximum
+rolling_std_10d
+rolling_std_5d
+volume_roc_10d
+涨跌额

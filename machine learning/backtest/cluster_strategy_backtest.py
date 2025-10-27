@@ -36,9 +36,9 @@ warnings.filterwarnings('ignore')
 
 # 添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+ml_root = os.path.dirname(current_dir)
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
 
 # 导入必要模块
 from sklearn.cluster import KMeans
@@ -67,14 +67,14 @@ class StrategyBacktest:
             报告保存目录
         """
         # 设置目录路径
-        self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.ml_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         if os.path.isabs(reports_dir):
             self.reports_dir = reports_dir
         else:
-            self.reports_dir = os.path.join(self.project_root, reports_dir)
+            self.reports_dir = os.path.join(self.ml_root, reports_dir)
         
-        self.ml_output_dir = os.path.join(self.project_root, "machine learning/ML output")
+        self.ml_output_dir = os.path.join(self.ml_root, "ML output")
         self.models_dir = os.path.join(self.ml_output_dir, "models")
         self.states_dir = os.path.join(self.ml_output_dir, "states")
         

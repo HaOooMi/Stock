@@ -51,12 +51,15 @@ from utils.logger import setup_logger
 
 def load_config(config_path: str) -> dict:
     """加载配置文件"""
+    # 如果是相对路径，转换为基于ml_root的绝对路径
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(ml_root, config_path.replace("machine learning/", ""))
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
 
 
-def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
+def main(config_path: str = "configs/ml_baseline.yml"):
     """
     主训练流程
     
@@ -85,7 +88,11 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     paths = config['paths']
     for key, path in paths.items():
         if path and isinstance(path, str) and 'baseline_v1' in path:
-            abs_path = os.path.abspath(path)
+            # 将相对路径转换为相对于 ml_root 的绝对路径
+            if not os.path.isabs(path):
+                abs_path = os.path.join(ml_root, path)
+            else:
+                abs_path = path
             os.makedirs(abs_path, exist_ok=True)
     print(f"   📁 输出目录已创建")
     
@@ -97,7 +104,7 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
     # 2. 加载数据
     print("\n📊 加载数据...")
     # 使用 datasets_dir 作为数据根目录（转换为绝对路径）
-    data_root = os.path.abspath(config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
+    data_root = os.path.join(ml_root, config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
     data_loader = DataLoader(data_root)
     
     features, targets = data_loader.load_features_and_targets(
@@ -350,7 +357,7 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='机器学习基线训练')
     parser.add_argument('--config', type=str, 
-                       default='machine learning/configs/ml_baseline.yml',
+                       default='configs/ml_baseline.yml',
                        help='配置文件路径')
     
     args = parser.parse_args()

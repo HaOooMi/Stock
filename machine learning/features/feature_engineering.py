@@ -820,8 +820,8 @@ class FeatureEngineer:
         
         # ===== 阶段8改进: 保存最终特征清单 =====
         try:
-            # 确保ML output目录存在
-            output_dir = os.path.join("machine learning", "ML output")
+            # 保存到 artifacts 目录
+            output_dir = os.path.join(ml_root, "ML output/artifacts/baseline_v1")
             os.makedirs(output_dir, exist_ok=True)
             
             # 保存特征清单文件
@@ -841,7 +841,7 @@ class FeatureEngineer:
     def scale_features(self, features_df: pd.DataFrame, 
                        scaler_type: str = 'robust',
                        train_ratio: float = 0.8,
-                       save_path: str = 'machine learning/ML output/scaler.pkl',
+                       save_path: str = 'ML output/scalers/scaler.pkl',
                        exclude_cols: Optional[List[str]] = None) -> Dict:
         """
         对特征做尺度标准化（时间序列防泄漏：仅用训练段 fit，其余段 transform）
@@ -1278,7 +1278,7 @@ if __name__ == "__main__":
             selection_results['final_features_df'],
             scaler_type='robust',  # 金融数据推荐使用RobustScaler
             train_ratio=0.8,       # 与特征选择保持一致的时间切分
-            save_path='machine learning/ML output/feature_scaler.pkl'
+            save_path='ML output/scalers/feature_scaler.pkl'
         )
         scaled_df = scale_results['scaled_df']
         print(f"✅ 特征标准化完成，缩放器已保存到 {scale_results['scaler_path']}")

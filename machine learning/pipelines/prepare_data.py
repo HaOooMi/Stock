@@ -30,12 +30,15 @@ from targets.target_engineering import TargetEngineer
 
 def load_config(config_path: str) -> dict:
     """加载配置文件"""
+    # 如果是相对路径，转换为基于ml_root的绝对路径
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(ml_root, config_path.replace("machine learning/", ""))
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
 
 
-def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
+def main(config_path: str = "configs/ml_baseline.yml"):
     """
     完整的数据准备流程
     
@@ -59,8 +62,8 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
         print(f"   📝 描述: {project_info.get('description', 'N/A')}")
     
     # 创建输出目录（转换为绝对路径）
-    datasets_dir = os.path.abspath(config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
-    scalers_dir = os.path.abspath(config['paths'].get('scalers_dir', 'ML output/scalers/baseline_v1'))
+    datasets_dir = os.path.join(ml_root, config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
+    scalers_dir = os.path.join(ml_root, config['paths'].get('scalers_dir', 'ML output/scalers/baseline_v1'))
     os.makedirs(datasets_dir, exist_ok=True)
     os.makedirs(scalers_dir, exist_ok=True)
     
@@ -148,7 +151,7 @@ def main(config_path: str = "machine learning/configs/ml_baseline.yml"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='数据准备流程')
     parser.add_argument('--config', type=str, 
-                       default='machine learning/configs/ml_baseline.yml',
+                       default='configs/ml_baseline.yml',
                        help='配置文件路径')
     
     args = parser.parse_args()

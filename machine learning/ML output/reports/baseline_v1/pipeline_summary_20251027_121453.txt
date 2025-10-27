@@ -1,0 +1,112 @@
+======================================================================
+股票机器学习完整流程摘要报告
+======================================================================
+生成时间: 2025-10-27 12:14:53
+
+🔧 特征工程结果:
+   ✅ 状态: 成功完成
+   📊 最终特征数: 15
+   🔢 样本数量: 672
+   💾 缩放器: scaler_000001.pkl
+   📊 特征文件: scaler_000001_scaled_features.csv
+
+🎯 目标变量工程结果:
+   ✅ 状态: 成功完成
+   📊 目标样本数: 672
+   🎓 可训练样本: 662
+   🎯 目标变量数: 3
+   💾 数据集文件: with_targets_000001_complete_20251027_121453.csv
+
+🔍 PCA状态生成结果:
+   ✅ 状态: 成功完成
+   📊 原始特征数: 15
+   🎯 PCA成分数: 5
+   📈 解释方差: 0.753 (75.3%)
+   📉 压缩比率: 3.0x
+   🏋️ 训练样本: 393
+   🧪 测试样本: 269
+   💾 PCA模型: pca_000001_20251027_121453.pkl
+
+📁 生成文件统计:
+   📄 artifacts\baseline_v1\final_feature_list.txt (0.2 KB)
+   📄 datasets\baseline_v1\with_targets_000001_complete_20251022_205442.csv (340.3 KB)
+   📄 datasets\baseline_v1\with_targets_000001_complete_20251027_113324.csv (340.3 KB)
+   📄 datasets\baseline_v1\with_targets_000001_complete_20251027_115558.csv (340.3 KB)
+   📄 datasets\baseline_v1\with_targets_000001_complete_20251027_120126.csv (265.0 KB)
+   📄 datasets\baseline_v1\with_targets_000001_complete_20251027_120417.csv (265.0 KB)
+   📄 datasets\baseline_v1\with_targets_000001_complete_20251027_121453.csv (265.0 KB)
+   📄 models\pca_000001_20251015_155343.pkl (2.1 KB)
+   📄 models\pca_000001_20251015_155419.pkl (2.1 KB)
+   📄 models\pca_000001_20251015_155430.pkl (2.1 KB)
+   📄 models\pca_000001_20251015_205433.pkl (2.1 KB)
+   📄 models\pca_metadata_000001_20251015_155343.json (0.5 KB)
+   📄 models\pca_metadata_000001_20251015_155419.json (0.5 KB)
+   📄 models\pca_metadata_000001_20251015_155430.json (0.5 KB)
+   📄 models\pca_metadata_000001_20251015_205433.json (0.5 KB)
+   📄 models\baseline_v1\lightgbm\lightgbm_model.pkl (30.7 KB)
+   📄 models\baseline_v1\pca\pca_000001_20251022_205002.pkl (2.1 KB)
+   📄 models\baseline_v1\pca\pca_000001_20251027_113352.pkl (2.1 KB)
+   📄 models\baseline_v1\pca\pca_000001_20251027_115617.pkl (2.1 KB)
+   📄 models\baseline_v1\pca\pca_000001_20251027_120126.pkl (2.1 KB)
+   📄 models\baseline_v1\pca\pca_000001_20251027_120417.pkl (2.1 KB)
+   📄 models\baseline_v1\pca\pca_000001_20251027_121453.pkl (2.1 KB)
+   📄 models\baseline_v1\pca\pca_metadata_000001_20251022_205002.json (0.5 KB)
+   📄 models\baseline_v1\pca\pca_metadata_000001_20251027_113352.json (0.5 KB)
+   📄 models\baseline_v1\pca\pca_metadata_000001_20251027_115617.json (0.5 KB)
+   📄 models\baseline_v1\pca\pca_metadata_000001_20251027_120126.json (0.5 KB)
+   📄 models\baseline_v1\pca\pca_metadata_000001_20251027_120417.json (0.5 KB)
+   📄 models\baseline_v1\pca\pca_metadata_000001_20251027_121453.json (0.5 KB)
+   📄 models\baseline_v1\random_forest\randomforest_model.pkl (2716.9 KB)
+   📄 models\baseline_v1\ridge\ridge_model.pkl (1.2 KB)
+   📄 reports\clustering_analysis_report.txt (2.0 KB)
+   📄 reports\clustering_summary_all_k.csv (6.6 KB)
+   📄 reports\clustering_validation_results.csv (0.4 KB)
+   📄 reports\cluster_comparison.csv (1.8 KB)
+   📄 reports\cluster_features_k4.csv (2.1 KB)
+   📄 reports\cluster_features_k5.csv (2.7 KB)
+   📄 reports\cluster_features_k6.csv (2.7 KB)
+   📄 reports\cluster_models.pkl (7.7 KB)
+   📄 reports\pc_metadata.pkl (0.3 KB)
+   📄 reports\strategy_analysis_000001_20251015_155419.txt (1.7 KB)
+   📄 reports\strategy_analysis_000001_20251015_205433.txt (1.7 KB)
+   📄 reports\strategy_equity_000001_20251015_155419.csv (46.4 KB)
+   📄 reports\strategy_equity_000001_20251015_205433.csv (17.9 KB)
+   📄 reports\triage_report_20251015_155432.txt (10.1 KB)
+   📄 reports\baseline_v1\pipeline_summary_20251027_115617.txt (5.1 KB)
+   📄 reports\baseline_v1\pipeline_summary_20251027_120126.txt (5.5 KB)
+   📄 reports\baseline_v1\pipeline_summary_20251027_120417.txt (6.0 KB)
+   📄 reports\baseline_v1\evaluation\evaluation_report.txt (1.1 KB)
+   📄 reports\baseline_v1\evaluation\model_bucket_performance.csv (2.1 KB)
+   📄 reports\baseline_v1\evaluation\summary.json (2.0 KB)
+   📄 reports\baseline_v1\evaluation\test_predictions.csv (31.8 KB)
+   📄 scalers\baseline_v1\scaler_000001.pkl (1.2 KB)
+   📄 scalers\baseline_v1\scaler_000001_meta.json (0.6 KB)
+   📄 scalers\baseline_v1\scaler_000001_scaled_features.csv (208.0 KB)
+   📄 states\states_pca_test_000001_20251015_155343.npy (5.4 KB)
+   📄 states\states_pca_test_000001_20251015_155419.npy (3.3 KB)
+   📄 states\states_pca_test_000001_20251015_155430.npy (3.3 KB)
+   📄 states\states_pca_test_000001_20251015_205433.npy (1.5 KB)
+   📄 states\states_pca_train_000001_20251015_155343.npy (20.8 KB)
+   📄 states\states_pca_train_000001_20251015_155419.npy (12.5 KB)
+   📄 states\states_pca_train_000001_20251015_155430.npy (12.5 KB)
+   📄 states\states_pca_train_000001_20251015_205433.npy (5.0 KB)
+   📄 states\baseline_v1\states_pca_test_000001_20251022_205002.npy (10.6 KB)
+   📄 states\baseline_v1\states_pca_test_000001_20251027_113352.npy (10.6 KB)
+   📄 states\baseline_v1\states_pca_test_000001_20251027_115617.npy (10.6 KB)
+   📄 states\baseline_v1\states_pca_test_000001_20251027_120126.npy (10.6 KB)
+   📄 states\baseline_v1\states_pca_test_000001_20251027_120417.npy (10.6 KB)
+   📄 states\baseline_v1\states_pca_test_000001_20251027_121453.npy (10.6 KB)
+   📄 states\baseline_v1\states_pca_train_000001_20251022_205002.npy (15.5 KB)
+   📄 states\baseline_v1\states_pca_train_000001_20251027_113352.npy (15.5 KB)
+   📄 states\baseline_v1\states_pca_train_000001_20251027_115617.npy (15.5 KB)
+   📄 states\baseline_v1\states_pca_train_000001_20251027_120126.npy (15.5 KB)
+   📄 states\baseline_v1\states_pca_train_000001_20251027_120417.npy (15.5 KB)
+   📄 states\baseline_v1\states_pca_train_000001_20251027_121453.npy (15.5 KB)
+
+   📊 总文件数: 74
+   💾 总大小: 5179.8 KB (5.06 MB)
+
+======================================================================
+🎊 完整流程成功完成！
+✨ 现在可以开始机器学习建模了
+======================================================================

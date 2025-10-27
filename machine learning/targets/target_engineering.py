@@ -23,9 +23,10 @@ warnings.filterwarnings('ignore')
 
 # 添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+ml_root = os.path.dirname(current_dir)
+project_root = os.path.dirname(ml_root)
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
 
 
 class TargetEngineer:
@@ -39,13 +40,13 @@ class TargetEngineer:
     4. 防止时间序列数据泄漏
     """
     
-    def __init__(self, data_dir: str = "machine learning/ML output"):
+    def __init__(self, data_dir: str = "ML output"):
         """
         初始化目标工程器
         
         Parameters:
         -----------
-        data_dir : str, default="data"
+        data_dir : str, default="ML output"
             数据保存目录
         """
         # 设置数据目录
@@ -53,8 +54,8 @@ class TargetEngineer:
             # 如果是绝对路径，直接使用
             self.data_dir = data_dir
         else:
-            # 如果是相对路径，相对于当前工作目录
-            self.data_dir = os.path.abspath(data_dir)
+            # 如果是相对路径，相对于ml_root
+            self.data_dir = os.path.join(ml_root, data_dir)
         
         # 确保数据目录存在
         os.makedirs(self.data_dir, exist_ok=True)
