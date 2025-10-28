@@ -84,16 +84,15 @@ def main(config_path: str = "configs/ml_baseline.yml"):
         print(f"   🔖 版本: {project_info.get('version', 'N/A')}")
     print(f"   ✅ 配置加载完成")
     
-    # 创建输出目录
+    # 规范化路径并创建输出目录
     paths = config['paths']
-    for key, path in paths.items():
-        if path and isinstance(path, str) and 'baseline_v1' in path:
+    for key, path in list(paths.items()):
+        if path and isinstance(path, str):
             # 将相对路径转换为相对于 ml_root 的绝对路径
-            if not os.path.isabs(path):
-                abs_path = os.path.join(ml_root, path)
-            else:
-                abs_path = path
-            os.makedirs(abs_path, exist_ok=True)
+            normalized_path = path if os.path.isabs(path) else os.path.join(ml_root, path)
+            paths[key] = normalized_path
+            if 'baseline_v1' in normalized_path:
+                os.makedirs(normalized_path, exist_ok=True)
     print(f"   📁 输出目录已创建")
     
     # 设置随机种子
@@ -104,7 +103,7 @@ def main(config_path: str = "configs/ml_baseline.yml"):
     # 2. 加载数据
     print("\n📊 加载数据...")
     # 使用 datasets_dir 作为数据根目录（转换为绝对路径）
-    data_root = os.path.join(ml_root, config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
+    data_root = config['paths'].get('datasets_dir', os.path.join(ml_root, 'ML output/datasets/baseline_v1'))
     data_loader = DataLoader(data_root)
     
     features, targets = data_loader.load_features_and_targets(

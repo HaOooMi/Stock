@@ -768,8 +768,11 @@ def main(config: dict = None):
         train_ratio = config.get('split', {}).get('train_ratio', 0.8)
         
         # 输出目录
-        models_dir = config.get('paths', {}).get('models_pca', 'ML output/models/baseline_v1/pca')
-        states_dir = config.get('paths', {}).get('states_dir', 'ML output/states/baseline_v1')
+        models_dir_cfg = config.get('paths', {}).get('models_pca', 'ML output/models/baseline_v1/pca')
+        states_dir_cfg = config.get('paths', {}).get('states_dir', 'ML output/states/baseline_v1')
+
+        models_dir = models_dir_cfg if os.path.isabs(models_dir_cfg) else os.path.join(ml_root, models_dir_cfg)
+        states_dir = states_dir_cfg if os.path.isabs(states_dir_cfg) else os.path.join(ml_root, states_dir_cfg)
         
         print("📋 执行配置:")
         print(f"   symbol: {symbol}")
