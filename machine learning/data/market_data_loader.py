@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-InfluxDB 数据加载器
+市场数据加载器
 
 功能：
-1. 从 InfluxDB 加载原始市场数据
-2. 为交易可行性过滤提供必要的字段（成交量、价格、换手率等）
-3. 复用 get_stock_info 中已有的查询函数
+1. 从 InfluxDB 加载原始市场数据（OHLCV、换手率等）
+2. 从 MySQL 加载股票元数据（上市时间、ST状态等）
+3. 为交易可行性过滤提供必要的字段
+4. 复用 get_stock_info 中已有的查询函数
 """
 
 import os
@@ -28,19 +29,21 @@ if project_root not in sys.path:
 # 尝试导入 get_stock_info 中的工具函数
 try:
     sys.path.insert(0, os.path.join(project_root, 'get_stock_info'))
-    from utils import get_influxdb_client
+    from utils import get_influxdb_client, get_mysql_engine
     from stock_market_data_akshare import get_history_data
+    from stock_meta_akshare import get_basic_info_mysql
     HAVE_GET_STOCK_INFO = True
 except ImportError:
     HAVE_GET_STOCK_INFO = False
     print("⚠️  无法导入 get_stock_info 模块")
 
 
-class InfluxDBLoader:
+class MarketDataLoader:
     """
-    InfluxDB 数据加载器
+    市场数据加载器
     
-    从 InfluxDB 加载原始市场数据，用于数据清洗和过滤
+    从 InfluxDB 加载原始市场数据（OHLCV、换手率等）
+    从 MySQL 加载股票元数据（上市时间、ST状态等）
     复用 get_stock_info 中的现有代码
     """
     
@@ -146,7 +149,8 @@ class InfluxDBLoader:
                     '振幅': 'amplitude',
                     '涨跌幅': 'pct_change',
                     '涨跌额': 'change',
-                    '换手率': 'turnover'
+                    '换手率': 'turnover',
+                    '是否停牌': 'is_suspended'
                 }
                 
                 # 重命名存在的列
@@ -193,7 +197,7 @@ class InfluxDBLoader:
                   columnKey: ["_field"],
                   valueColumn: "_value"
               )
-              |> keep(columns: ["_time", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"])
+              |> keep(columns: ["_time", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "是否停牌"])
         '''
         
         try:
@@ -214,7 +218,8 @@ class InfluxDBLoader:
                 '振幅': 'amplitude',
                 '涨跌幅': 'pct_change',
                 '涨跌额': 'change',
-                '换手率': 'turnover'
+                '换手率': 'turnover',
+                '是否停牌': 'is_suspended'
             }
             
             df = df.rename(columns=column_map)
@@ -235,25 +240,37 @@ class InfluxDBLoader:
             print(f"   ❌ 查询失败: {e}")
             return pd.DataFrame()
     
-    def get_st_stocks(self, date: Optional[str] = None) -> List[str]:
+    def is_st_stock(self, symbol: str) -> bool:
         """
-        获取 ST 股票列表
+        判断是否为 ST 股票
         
-        通过股票名称判断是否为 ST 股票
+        通过 MySQL 查询股票名称判断
         
         Parameters:
         -----------
-        date : str, optional
-            查询日期（暂未使用，保留接口）
+        symbol : str
+            股票代码
             
         Returns:
         --------
-        List[str]
-            ST 股票代码列表
+        bool
+            是否为 ST 股票
         """
-        # TODO: 可以从 InfluxDB 的股票名称字段判断
-        # 或者从数据库查询
-        return []
+        if not HAVE_GET_STOCK_INFO:
+            return False
+        
+        try:
+            engine = get_mysql_engine()
+            with engine.connect() as conn:
+                info_dict = get_basic_info_mysql(conn, (symbol,))
+                if symbol in info_dict:
+                    stock_name = info_dict[symbol].get('股票简称', '')
+                    # 判断股票名称是否包含 ST
+                    return 'ST' in stock_name or 'st' in stock_name
+        except Exception as e:
+            print(f"   ⚠️  查询 ST 信息失败: {e}")
+        
+        return False
     
     def get_suspend_info(self,
                         symbol: str,
@@ -291,6 +308,8 @@ class InfluxDBLoader:
         """
         获取股票上市日期
         
+        从 MySQL stock_individual_info 表查询
+        
         Parameters:
         -----------
         symbol : str
@@ -301,8 +320,20 @@ class InfluxDBLoader:
         str or None
             上市日期 (YYYY-MM-DD)
         """
-        # TODO: 可以从 MySQL stock_individual_info 表查询
-        # 或者从 InfluxDB 的第一条记录推断
+        if not HAVE_GET_STOCK_INFO:
+            return None
+        
+        try:
+            engine = get_mysql_engine()
+            with engine.connect() as conn:
+                info_dict = get_basic_info_mysql(conn, (symbol,))
+                if symbol in info_dict:
+                    listing_date = info_dict[symbol].get('上市时间')
+                    if listing_date:
+                        return str(listing_date)
+        except Exception as e:
+            print(f"   ⚠️  查询上市时间失败: {e}")
+        
         return None
     
     def close(self):
@@ -316,12 +347,12 @@ if __name__ == "__main__":
     """
     使用示例
     """
-    print("📊 InfluxDB 数据加载器测试")
+    print("📊 市场数据加载器测试")
     print("=" * 50)
     
     try:
         # 初始化加载器
-        loader = InfluxDBLoader()
+        loader = MarketDataLoader()
         
         if loader.query_api is None:
             print("❌ InfluxDB 未连接，请先启动 InfluxDB")

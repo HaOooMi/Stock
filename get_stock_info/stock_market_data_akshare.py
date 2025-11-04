@@ -7,7 +7,10 @@ from influxdb_client.client.query_api import QueryApi
 from typing import List
 from datetime import timezone, timedelta
 
-from get_stock_info.utils import parse_unit_value
+try:
+    from get_stock_info.utils import parse_unit_value
+except ImportError:
+    from utils import parse_unit_value
 
 # 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
 #                         ./influxd
@@ -28,51 +31,71 @@ def fetch_history_market_data(client,measurement_name):
         stock_name = row["name"]
         print(f"--- 正在处理股票历史行情数据: {stock_name} ({stock_code}) ---")
 
-        try:
-            kline_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="hfq")
-            
-            if kline_df.empty:
-                print(f"  -> 未找到 {stock_name} ({stock_code}) 的历史行情数据,跳过。")
-                continue
+        # 重试机制：最多重试3次
+        max_retries = 3
+        retry_count = 0
+        success = False
+        
+        while retry_count < max_retries and not success:
+            try:
+                kline_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="hfq")
+                
+                if kline_df.empty:
+                    print(f"  -> 未找到 {stock_name} ({stock_code}) 的历史行情数据,跳过。")
+                    break
 
-            points = []
-            for _, kline_row in kline_df.iterrows():
-                p = Point(measurement_name) \
-                    .tag("股票代码", stock_code) \
-                    .tag("股票名称", stock_name) \
-                    .field("开盘", float(kline_row["开盘"])) \
-                    .field("收盘", float(kline_row["收盘"])) \
-                    .field("最高", float(kline_row["最高"])) \
-                    .field("最低", float(kline_row["最低"])) \
-                    .field("成交量", int(kline_row["成交量"])) \
-                    .field("成交额", float(kline_row["成交额"])) \
-                    .field("振幅", float(kline_row["振幅"])) \
-                    .field("涨跌幅", float(kline_row["涨跌幅"])) \
-                    .field("涨跌额", float(kline_row["涨跌额"])) \
+                points = []
+                for _, kline_row in kline_df.iterrows():
+                    # 判断是否停牌：成交量=0 且 成交额=0
+                    volume = int(kline_row["成交量"])
+                    amount = float(kline_row["成交额"])
+                    is_suspended = 1 if (volume == 0 and amount == 0) else 0
+                    
+                    p = Point(measurement_name) \
+                        .tag("股票代码", stock_code) \
+                        .tag("股票名称", stock_name) \
+                        .field("开盘", float(kline_row["开盘"])) \
+                        .field("收盘", float(kline_row["收盘"])) \
+                        .field("最高", float(kline_row["最高"])) \
+                        .field("最低", float(kline_row["最低"])) \
+                        .field("成交量", volume) \
+                        .field("成交额", amount) \
+                        .field("振幅", float(kline_row["振幅"])) \
+                        .field("涨跌幅", float(kline_row["涨跌幅"])) \
+                        .field("涨跌额", float(kline_row["涨跌额"])) \
                     .field("换手率", float(kline_row["换手率"])) \
+                    .field("是否停牌", is_suspended) \
                     .time(pd.to_datetime(kline_row["日期"]))
                 
                 points.append(p)
 
-            write_api = client.write_api(
-                write_options=WriteOptions(
-                    batch_size=5000,  
-                    flush_interval=10_000, 
-                    jitter_interval=2_000, 
-                    retry_interval=5_000,  
-            )
-            )
-            write_api.write(bucket="stock_kdata", org="stock", record=points)
-            print(f"  -> 成功写入 {len(points)} 条 {stock_name} ({stock_code}) 的历史行情数据。")
-            
-            time.sleep(0.2)
+                write_api = client.write_api(
+                    write_options=WriteOptions(
+                        batch_size=5000,  
+                        flush_interval=10_000, 
+                        jitter_interval=2_000, 
+                        retry_interval=5_000,  
+                )
+                )
+                write_api.write(bucket="stock_kdata", org="stock", record=points)
+                print(f"  -> 成功写入 {len(points)} 条 {stock_name} ({stock_code}) 的历史行情数据。")
+                
+                success = True  # 成功，退出重试循环
+                time.sleep(0.3)  # 稍微增加延迟，避免请求过快
 
-        except KeyboardInterrupt:
-            print("\n程序被用户中断。正在关闭...")
-            break
-        except Exception as e:
-            print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
-            continue
+            except KeyboardInterrupt:
+                print("\n程序被用户中断。正在关闭...")
+                return  # 直接退出函数
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = retry_count * 2  # 递增等待时间：2秒、4秒、6秒
+                    print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
+                    print(f"  -> 等待 {wait_time} 秒后重试 (第 {retry_count}/{max_retries} 次)...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"  -> 处理 {stock_name} ({stock_code}) 失败，已达最大重试次数，跳过。")
+                    print(f"     错误信息: {e}")
 
 
 def fetch_now_market_data(client,measurement_name): 
@@ -91,14 +114,20 @@ def fetch_now_market_data(client,measurement_name):
             for _, row in realtime_df.iterrows():
                 if pd.isna(row['最新价']):
                     continue
+                
+                # 判断是否停牌：成交量=0 或 最新价=昨收（无交易）
+                volume = parse_unit_value(row['成交量'])
+                amount = parse_unit_value(row['成交额'])
+                is_suspended = 1 if (volume == 0 or amount == 0) else 0
+                
                 p = Point(measurement_name) \
                     .tag("股票代码", row['代码']) \
                     .tag("股票名称", row['名称']) \
                     .field("最新价", parse_unit_value(row['最新价'])) \
                     .field("涨跌幅(%)", float(row['涨跌幅'])) \
                     .field("涨跌额", parse_unit_value(row['涨跌额'])) \
-                    .field("成交量(手)", parse_unit_value(row['成交量'])) \
-                    .field("成交额(元)", parse_unit_value(row['成交额'])) \
+                    .field("成交量(手)", volume) \
+                    .field("成交额(元)", amount) \
                     .field("振幅(%)", float(row['振幅'])) \
                     .field("最高", parse_unit_value(row['最高'])) \
                     .field("最低", parse_unit_value(row['最低'])) \
@@ -114,6 +143,7 @@ def fetch_now_market_data(client,measurement_name):
                     .field("5分钟涨跌(%)", float(row['5分钟涨跌'])) \
                     .field("60日涨跌幅(%)", float(row['60日涨跌幅'])) \
                     .field("年初至今涨跌幅(%)", float(row['年初至今涨跌幅'])) \
+                    .field("是否停牌", is_suspended) \
                     .time(current_time)
                 points.append(p)
             if points:
@@ -143,7 +173,7 @@ def get_history_data(query_api: QueryApi, symbol: str, start: str, stop: str) ->
               columnKey: ["_field"],
               valueColumn: "_value"
           )
-          |> keep(columns: ["_time", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率"])
+          |> keep(columns: ["_time", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "是否停牌"])
           |> rename(columns: {{_time: "日期"}})
     '''
     try:
