@@ -70,6 +70,14 @@ data:
     financial_lag_days: 90          # 财务数据滞后天数
     use_adj_factor: true            # 使用后复权因子
     validate_alignment: true        # 验证PIT对齐
+  
+  # InfluxDB 配置（从InfluxDB加载原始市场数据）
+  influxdb:
+    enabled: true                   # 是否启用InfluxDB数据加载
+    url: "http://localhost:8086"    # InfluxDB 地址
+    org: "stock"                    # 组织名称
+    bucket: "stock_kdata"           # Bucket 名称
+    token: "aIX6s47YmoJ-OY-rjRbLFl6AHFSYcv000g3vJp3f6l6hkbmvuj-AMtgfkjz0ESF7r536jqasqxzL9NhohGMrwA=="  # 访问令牌
     
 # ===================== 特征配置 =====================
 features:

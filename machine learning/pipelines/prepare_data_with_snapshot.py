@@ -26,6 +26,10 @@ project_root = os.path.dirname(ml_root)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# 添加 machine learning 目录到路径
+if ml_root not in sys.path:
+    sys.path.insert(0, ml_root)
+
 from data.data_loader import DataLoader
 
 
@@ -75,11 +79,24 @@ def main():
         'limit_threshold': config['data']['universe']['limit_threshold']
     }
     
+    # 从配置文件读取 InfluxDB 配置
+    influxdb_enabled = config['data'].get('influxdb', {}).get('enabled', True)
+    influxdb_config = None
+    if influxdb_enabled:
+        influxdb_config = {
+            'url': config['data']['influxdb']['url'],
+            'org': config['data']['influxdb']['org'],
+            'bucket': config['data']['influxdb']['bucket'],
+            'token': config['data']['influxdb']['token']
+        }
+    
     loader = DataLoader(
         data_root=os.path.join(ml_root, "ML output/datasets/baseline_v1"),
         enable_snapshot=config['data']['snapshot']['enabled'],
         enable_filtering=True,
         enable_pit_alignment=config['data']['pit']['enabled'],
+        enable_influxdb=influxdb_enabled,
+        influxdb_config=influxdb_config,
         filter_config=filter_config
     )
     

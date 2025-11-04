@@ -33,17 +33,20 @@ try:
     from data.data_snapshot import DataSnapshot
     from data.tradability_filter import TradabilityFilter
     from data.pit_aligner import PITDataAligner
+    from data.influxdb_loader import InfluxDBLoader
 except ImportError:
     # 如果模块未找到，尝试相对导入
     try:
         from data_snapshot import DataSnapshot
         from tradability_filter import TradabilityFilter
         from pit_aligner import PITDataAligner
+        from influxdb_loader import InfluxDBLoader
     except ImportError:
         print("⚠️  警告: 无法导入数据清洗模块，部分功能可能不可用")
         DataSnapshot = None
         TradabilityFilter = None
         PITDataAligner = None
+        InfluxDBLoader = None
 
 
 class DataLoader:
@@ -64,6 +67,8 @@ class DataLoader:
                  enable_snapshot: bool = True,
                  enable_filtering: bool = True,
                  enable_pit_alignment: bool = True,
+                 enable_influxdb: bool = True,
+                 influxdb_config: Optional[Dict[str, str]] = None,
                  filter_config: Optional[Dict[str, Any]] = None):
         """
         初始化数据加载器
@@ -78,6 +83,10 @@ class DataLoader:
             是否启用交易可行性过滤
         enable_pit_alignment : bool
             是否启用PIT对齐
+        enable_influxdb : bool
+            是否启用InfluxDB数据加载
+        influxdb_config : dict, optional
+            InfluxDB配置
         filter_config : dict, optional
             过滤器配置
         """
@@ -90,6 +99,18 @@ class DataLoader:
         self.enable_snapshot = enable_snapshot
         self.enable_filtering = enable_filtering
         self.enable_pit_alignment = enable_pit_alignment
+        self.enable_influxdb = enable_influxdb
+        
+        # 初始化 InfluxDB 加载器
+        if enable_influxdb and InfluxDBLoader is not None:
+            influxdb_config = influxdb_config or {}
+            try:
+                self.influxdb_loader = InfluxDBLoader(**influxdb_config)
+            except Exception as e:
+                print(f"   ⚠️  InfluxDB初始化失败: {e}")
+                self.influxdb_loader = None
+        else:
+            self.influxdb_loader = None
         
         # 初始化子模块
         if enable_snapshot and DataSnapshot is not None:
@@ -113,6 +134,7 @@ class DataLoader:
         print(f"   快照管理: {'✅' if enable_snapshot else '❌'}")
         print(f"   交易过滤: {'✅' if enable_filtering else '❌'}")
         print(f"   PIT对齐: {'✅' if enable_pit_alignment else '❌'}")
+        print(f"   InfluxDB: {'✅' if self.influxdb_loader is not None else '❌'}")
     
     def _load_csv_with_encoding(self, file_path: str) -> pd.DataFrame:
         """
@@ -255,6 +277,82 @@ class DataLoader:
               f"{features_clean.index.get_level_values('date').max().date()}")
         
         return features_clean, targets_clean
+    
+    def _load_market_data_from_influxdb(self,
+                                       symbol: str,
+                                       start_date: str,
+                                       end_date: str) -> pd.DataFrame:
+        """
+        从 InfluxDB 加载市场数据
+        
+        Parameters:
+        -----------
+        symbol : str
+            股票代码
+        start_date : str
+            开始日期
+        end_date : str
+            结束日期
+            
+        Returns:
+        --------
+        pd.DataFrame
+            市场数据，索引为日期
+        """
+        if self.influxdb_loader is None:
+            print(f"   ⚠️  InfluxDB未启用，跳过市场数据加载")
+            return pd.DataFrame()
+        
+        try:
+            market_df = self.influxdb_loader.load_market_data(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            return market_df
+        except Exception as e:
+            print(f"   ⚠️  从InfluxDB加载市场数据失败: {e}")
+            return pd.DataFrame()
+    
+    def _merge_market_data(self,
+                          features: pd.DataFrame,
+                          market_df: pd.DataFrame,
+                          symbol: str) -> pd.DataFrame:
+        """
+        合并市场数据到特征数据
+        
+        Parameters:
+        -----------
+        features : pd.DataFrame
+            特征数据，MultiIndex [date, ticker]
+        market_df : pd.DataFrame
+            市场数据，索引为日期
+        symbol : str
+            股票代码
+            
+        Returns:
+        --------
+        pd.DataFrame
+            合并后的数据
+        """
+        if market_df.empty:
+            return features
+        
+        # 提取特征数据的日期索引
+        dates = features.index.get_level_values('date')
+        
+        # 对齐市场数据到特征数据的日期
+        market_aligned = market_df.reindex(dates)
+        
+        # 添加需要的列到特征数据
+        # 注意：不覆盖已存在的列
+        for col in market_aligned.columns:
+            if col not in features.columns:
+                features[col] = market_aligned[col].values
+        
+        print(f"   ✅ 市场数据合并完成: 添加 {len(market_aligned.columns)} 列")
+        
+        return features
     
     def load_universe(self, 
                      symbol: str,
@@ -406,7 +504,20 @@ class DataLoader:
             use_scaled=use_scaled
         )
         
-        # 2. 应用交易可行性过滤
+        # 2. 从 InfluxDB 加载市场数据（如果启用）
+        if self.enable_influxdb and self.influxdb_loader is not None:
+            print(f"\n[InfluxDB] 加载市场数据")
+            market_df = self._load_market_data_from_influxdb(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if not market_df.empty:
+                # 合并市场数据到特征数据
+                features = self._merge_market_data(features, market_df, symbol)
+        
+        # 3. 应用交易可行性过滤
         if self.enable_filtering and self.filter_engine is not None:
             # 合并特征和目标以便过滤
             combined_data = features.copy()
@@ -433,7 +544,7 @@ class DataLoader:
             
             print(f"\n   ✅ 交易过滤完成: {len(features)} 个可交易样本")
         
-        # 3. PIT对齐验证
+        # 4. PIT对齐验证
         if self.enable_pit_alignment and self.pit_aligner is not None:
             combined_data = features.copy()
             combined_data[target_col] = targets
@@ -446,7 +557,7 @@ class DataLoader:
             if not pit_results.get('overall_pass', False):
                 print(f"   ⚠️  警告: PIT对齐验证未通过")
         
-        # 4. 创建数据快照
+        # 5. 创建数据快照
         snapshot_id = None
         if self.enable_snapshot and self.snapshot_mgr is not None:
             # 准备快照数据
