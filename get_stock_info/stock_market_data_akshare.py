@@ -1,4 +1,5 @@
 import time
+import os
 import akshare as ak
 import pandas as pd
 import random
@@ -6,11 +7,21 @@ from influxdb_client import Point, WriteOptions
 from influxdb_client.client.query_api import QueryApi
 from typing import List
 from datetime import timezone, timedelta
+from requests.exceptions import ProxyError as RequestsProxyError, ConnectionError as RequestsConnectionError
+from http.client import RemoteDisconnected
 
 try:
     from get_stock_info.utils import parse_unit_value
 except ImportError:
     from utils import parse_unit_value
+
+# 彻底禁用外部代理，避免 VPN 或系统代理影响 EastMoney 请求
+for env_key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+    if env_key in os.environ:
+        os.environ.pop(env_key)
+
+if hasattr(ak, "proxies"):
+    ak.proxies = None
 
 # 需要先用powershell运行：cd -Path 'C:\Program Files\InfluxData'
 #                         ./influxd
@@ -25,6 +36,8 @@ def fetch_history_market_data(client,measurement_name):
     except Exception as e:
         print(f"获取A股列表失败: {e}")
         return
+
+    proxies_disabled = False  # 全局标记：是否已关闭 AkShare 代理
 
     for index, row in stock_list_df.iterrows():
         stock_code = row["code"]
@@ -66,8 +79,7 @@ def fetch_history_market_data(client,measurement_name):
                     .field("换手率", float(kline_row["换手率"])) \
                     .field("是否停牌", is_suspended) \
                     .time(pd.to_datetime(kline_row["日期"]))
-                
-                points.append(p)
+                    points.append(p)
 
                 write_api = client.write_api(
                     write_options=WriteOptions(
@@ -82,6 +94,43 @@ def fetch_history_market_data(client,measurement_name):
                 
                 success = True  # 成功，退出重试循环
                 time.sleep(0.3)  # 稍微增加延迟，避免请求过快
+
+            except RequestsProxyError as proxy_err:
+                retry_count += 1
+                proxy_detail = getattr(proxy_err, "__cause__", None)
+                proxy_msg = str(proxy_detail) if proxy_detail else str(proxy_err)
+
+                if not proxies_disabled and hasattr(ak, "proxies") and ak.proxies:
+                    print("  -> 检测到通过代理请求行情数据失败，正在临时关闭 AkShare 代理设置后重试...")
+                    ak.proxies = None
+                    proxies_disabled = True
+                    time.sleep(2)
+                    continue
+
+                wait_time = retry_count * 2
+                print(f"  -> 处理 {stock_name} ({stock_code}) 时发生代理错误: {proxy_msg}")
+                if retry_count < max_retries:
+                    print(f"  -> 等待 {wait_time} 秒后重试 (第 {retry_count}/{max_retries} 次)...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"  -> 处理 {stock_name} ({stock_code}) 失败，代理多次连接失败，跳过。")
+
+            except RequestsConnectionError as conn_err:
+                retry_count += 1
+                cause = getattr(conn_err, "__cause__", None)
+                if isinstance(cause, RemoteDisconnected):
+                    detail = "对端主动断开连接"
+                else:
+                    detail = str(conn_err)
+
+                wait_time = min(10, 2 * retry_count)
+                print(f"  -> 拉取 {stock_name} ({stock_code}) 行情时网络连接异常: {detail}")
+                if retry_count < max_retries:
+                    print(f"  -> 等待 {wait_time} 秒后重试 (第 {retry_count}/{max_retries} 次)...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"  -> 处理 {stock_name} ({stock_code}) 失败，网络多次连接失败，跳过。")
+                    print("     建议确认 VPN/网络未拦截 eastmoney 域名，或稍后再试。")
 
             except KeyboardInterrupt:
                 print("\n程序被用户中断。正在关闭...")

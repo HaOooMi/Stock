@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 财务数据加载器
@@ -98,9 +98,12 @@ class FinancialDataLoader:
                 # 确保日期格式
                 df['report_date'] = pd.to_datetime(df['report_date'])
                 
-                # 添加公告日（假设为报告期后 45 天，实际应从数据库获取）
-                # TODO: 需要在 MySQL 添加公告日字段
-                df['announce_date'] = df['report_date'] + pd.Timedelta(days=45)
+                # 使用真实的公告日期（从MySQL获取）
+                if 'announce_date' in df.columns:
+                    df['announce_date'] = pd.to_datetime(df['announce_date'])
+                else:
+                    print(f"   ⚠️  警告: 数据库中缺少公告日期，使用报告期+45天作为估算")
+                    df['announce_date'] = df['report_date'] + pd.Timedelta(days=45)
                 
                 # 计算生效日期（公告日 + 滞后天数）
                 df['effective_date'] = df['announce_date'] + pd.Timedelta(days=self.announce_lag_days)
@@ -140,6 +143,7 @@ class FinancialDataLoader:
         column_map = {
             '股票代码': 'symbol',
             '报告期': 'report_date',
+            '公告日期': 'announce_date',  # 添加公告日期映射
             '净利润': 'net_profit',
             '净利润同比增长率': 'net_profit_yoy',
             '扣非净利润': 'net_profit_deducted',

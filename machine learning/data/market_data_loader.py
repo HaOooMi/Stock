@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 市场数据加载器
@@ -169,6 +169,9 @@ class MarketDataLoader:
                 # 排序
                 df = df.sort_index()
                 
+                # 添加元数据字段（从MySQL获取）
+                df = self._enrich_with_metadata(df, symbol)
+                
                 print(f"   ✅ 加载完成: {len(df)} 条记录")
                 
                 return df
@@ -239,6 +242,60 @@ class MarketDataLoader:
         except Exception as e:
             print(f"   ❌ 查询失败: {e}")
             return pd.DataFrame()
+    
+    def _enrich_with_metadata(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """
+        从MySQL添加元数据字段（ST状态、上市时间、总股本等）
+        
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            市场数据
+        symbol : str
+            股票代码
+            
+        Returns:
+        --------
+        pd.DataFrame
+            添加了元数据的市场数据
+        """
+        if not HAVE_GET_STOCK_INFO:
+            return df
+        
+        try:
+            engine = get_mysql_engine()
+            with engine.connect() as conn:
+                info_dict = get_basic_info_mysql(conn, (symbol,))
+                if symbol in info_dict:
+                    stock_info = info_dict[symbol]
+                    
+                    # 添加股票名称
+                    df['name'] = stock_info.get('股票简称', '')
+                    
+                    # 添加ST标志
+                    stock_name = stock_info.get('股票简称', '')
+                    df['st_flag'] = 1 if ('ST' in stock_name or 'st' in stock_name) else 0
+                    
+                    # 添加上市日期
+                    list_date = stock_info.get('上市时间')
+                    if list_date:
+                        df['list_date'] = pd.to_datetime(list_date)
+                    
+                    # 添加总股本（用于计算换手率）
+                    shares_outstanding = stock_info.get('总股本')
+                    if shares_outstanding:
+                        df['shares_outstanding'] = float(shares_outstanding)
+                        
+                        # 计算换手率（如果还没有）
+                        if 'turnover_rate' not in df.columns and 'volume' in df.columns:
+                            df['turnover_rate'] = df['volume'] / df['shares_outstanding']
+                    
+                    print(f"   ✓ 元数据添加完成")
+                    
+        except Exception as e:
+            print(f"   ⚠️  添加元数据失败: {e}")
+        
+        return df
     
     def is_st_stock(self, symbol: str) -> bool:
         """

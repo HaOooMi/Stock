@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 数据加载器 - 统一数据接口
@@ -354,6 +354,79 @@ class DataLoader:
         
         return features
     
+    def _load_and_merge_financial_data(self,
+                                       features: pd.DataFrame,
+                                       targets: pd.Series,
+                                       symbol: str,
+                                       start_date: str,
+                                       end_date: str) -> Tuple[pd.DataFrame, pd.Series]:
+        """
+        加载财务数据并合并到特征（PIT对齐）
+        
+        Parameters:
+        -----------
+        features : pd.DataFrame
+            现有特征数据
+        targets : pd.Series
+            目标数据
+        symbol : str
+            股票代码
+        start_date : str
+            开始日期
+        end_date : str
+            结束日期
+            
+        Returns:
+        --------
+        Tuple[pd.DataFrame, pd.Series]
+            合并后的特征和目标
+        """
+        try:
+            # 导入财务数据加载器
+            from data.financial_data_loader import FinancialDataLoader
+            
+            # 初始化财务数据加载器
+            financial_loader = FinancialDataLoader(announce_lag_days=90)
+            
+            # 加载财务数据
+            financial_df = financial_loader.load_financial_data(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if financial_df.empty:
+                print(f"   ⚠️  未找到财务数据")
+                return features, targets
+            
+            # 计算财务特征
+            financial_df = financial_loader.calculate_financial_features(financial_df)
+            
+            # 对齐到交易日
+            dates = features.index.get_level_values('date').unique()
+            aligned_financial = financial_loader.align_to_trading_dates(
+                financial_df, 
+                pd.DatetimeIndex(dates)
+            )
+            
+            # 合并到特征数据
+            for col in aligned_financial.columns:
+                if col not in ['symbol', 'report_date', 'announce_date', 'effective_date']:
+                    # 添加前缀避免列名冲突
+                    new_col = f'fin_{col}'
+                    if new_col not in features.columns:
+                        # 对齐索引
+                        feature_dates = features.index.get_level_values('date')
+                        aligned_values = aligned_financial[col].reindex(feature_dates)
+                        features[new_col] = aligned_values.values
+            
+            print(f"   ✓ 财务特征合并完成: 添加 {len([c for c in features.columns if c.startswith('fin_')])} 个财务特征")
+            
+        except Exception as e:
+            print(f"   ⚠️  财务数据加载失败: {e}")
+        
+        return features, targets
+    
     def load_universe(self, 
                      symbol: str,
                      min_volume: Optional[float] = None,
@@ -517,7 +590,14 @@ class DataLoader:
                 # 合并市场数据到特征数据
                 features = self._merge_market_data(features, market_df, symbol)
         
-        # 3. 应用交易可行性过滤
+        # 3. 加载并合并财务数据（PIT对齐）
+        if self.enable_pit_alignment:
+            print(f"\n[财务数据] 加载并对齐财务数据")
+            features, targets = self._load_and_merge_financial_data(
+                features, targets, symbol, start_date, end_date
+            )
+        
+        # 4. 应用交易可行性过滤
         if self.enable_filtering and self.filter_engine is not None:
             # 合并特征和目标以便过滤
             combined_data = features.copy()
@@ -544,7 +624,7 @@ class DataLoader:
             
             print(f"\n   ✅ 交易过滤完成: {len(features)} 个可交易样本")
         
-        # 4. PIT对齐验证
+        # 4. PIT对齐验证（在过滤之后）
         if self.enable_pit_alignment and self.pit_aligner is not None:
             combined_data = features.copy()
             combined_data[target_col] = targets

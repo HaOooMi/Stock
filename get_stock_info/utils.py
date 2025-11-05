@@ -74,44 +74,44 @@ def create_financial_table(engine, table_name: str):
                 `公告日期` DATE COMMENT '财报公告日期（实际或估算）',
                 
                 -- 利润相关指标
-                `净利润` DECIMAL(20,2) COMMENT '净利润（元）',
-                `净利润同比增长率` DECIMAL(10,6) COMMENT '净利润同比增长率（小数形式）',
-                `扣非净利润` DECIMAL(20,2) COMMENT '扣除非经常性损益后净利润（元）',
-                `扣非净利润同比增长率` DECIMAL(10,6) COMMENT '扣非净利润同比增长率（小数形式）',
+                `净利润` DOUBLE COMMENT '净利润（元）',
+                `净利润同比增长率` DOUBLE COMMENT '净利润同比增长率（小数形式）',
+                `扣非净利润` DOUBLE COMMENT '扣除非经常性损益后净利润（元）',
+                `扣非净利润同比增长率` DOUBLE COMMENT '扣非净利润同比增长率（小数形式）',
                 
                 -- 营收相关指标
-                `营业总收入` DECIMAL(20,2) COMMENT '营业总收入（元）',
-                `营业总收入同比增长率` DECIMAL(10,6) COMMENT '营业总收入同比增长率（小数形式）',
+                `营业总收入` DOUBLE COMMENT '营业总收入（元）',
+                `营业总收入同比增长率` DOUBLE COMMENT '营业总收入同比增长率（小数形式）',
                 
                 -- 每股指标
-                `基本每股收益` DECIMAL(10,4) COMMENT '基本每股收益（元/股）',
-                `每股净资产` DECIMAL(10,4) COMMENT '每股净资产（元/股）',
-                `每股资本公积金` DECIMAL(10,4) COMMENT '每股资本公积金（元/股）',
-                `每股未分配利润` DECIMAL(10,4) COMMENT '每股未分配利润（元/股）',
-                `每股经营现金流` DECIMAL(10,4) COMMENT '每股经营现金流（元/股）',
+                `基本每股收益` DOUBLE COMMENT '基本每股收益（元/股）',
+                `每股净资产` DOUBLE COMMENT '每股净资产（元/股）',
+                `每股资本公积金` DOUBLE COMMENT '每股资本公积金（元/股）',
+                `每股未分配利润` DOUBLE COMMENT '每股未分配利润（元/股）',
+                `每股经营现金流` DOUBLE COMMENT '每股经营现金流（元/股）',
                 
                 -- 盈利能力指标
-                `销售净利率` DECIMAL(10,6) COMMENT '销售净利率（小数形式）',
-                `净资产收益率` DECIMAL(10,6) COMMENT 'ROE 净资产收益率（小数形式）',
-                `净资产收益率_摊薄` DECIMAL(10,6) COMMENT 'ROE 摊薄（小数形式）',
+                `销售净利率` DOUBLE COMMENT '销售净利率（小数形式）',
+                `净资产收益率` DOUBLE COMMENT 'ROE 净资产收益率（小数形式）',
+                `净资产收益率_摊薄` DOUBLE COMMENT 'ROE 摊薄（小数形式）',
                 
                 -- 运营能力指标
-                `营业周期` DECIMAL(10,2) COMMENT '营业周期（天）',
-                `应收账款周转天数` DECIMAL(10,2) COMMENT '应收账款周转天数（天）',
+                `营业周期` DOUBLE COMMENT '营业周期（天）',
+                `应收账款周转天数` DOUBLE COMMENT '应收账款周转天数（天）',
                 
                 -- 偿债能力指标
-                `流动比率` DECIMAL(10,4) COMMENT '流动比率',
-                `速动比率` DECIMAL(10,4) COMMENT '速动比率',
-                `保守速动比率` DECIMAL(10,4) COMMENT '保守速动比率',
-                `产权比率` DECIMAL(10,4) COMMENT '产权比率',
-                `资产负债率` DECIMAL(10,6) COMMENT '资产负债率（小数形式）',
+                `流动比率` DOUBLE COMMENT '流动比率',
+                `速动比率` DOUBLE COMMENT '速动比率',
+                `保守速动比率` DOUBLE COMMENT '保守速动比率',
+                `产权比率` DOUBLE COMMENT '产权比率',
+                `资产负债率` DOUBLE COMMENT '资产负债率（小数形式）',
                 
                 PRIMARY KEY (`股票代码`, `报告期`),
                 INDEX `idx_announcement_date` (`公告日期`),
                 INDEX `idx_stock_code` (`股票代码`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='股票财务指标表';
         """))
-    print(f"表 `{table_name}` 已创建（优化结构：百分比字段使用 DECIMAL 存储）")
+    print(f"表 `{table_name}` 已创建")
 
 import pandas as pd
 
