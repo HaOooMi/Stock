@@ -119,11 +119,67 @@ class PITDataAligner:
         
         return df
     
+    def align_to_trading_calendar(self,
+                                 data: pd.DataFrame,
+                                 date_col: str = 'date') -> pd.DataFrame:
+        """
+        对齐到交易日历
+        
+        可能用途：
+        - 多股票组合数据对齐
+        - 确保所有数据都在交易日
+        
+        Parameters:
+        -----------
+        data : pd.DataFrame
+            数据
+        date_col : str
+            日期列名
+            
+        Returns:
+        --------
+        pd.DataFrame
+            对齐后的数据
+        """
+        print(f"\n📅 对齐到交易日历")
+        
+        df = data.copy()
+        
+        # 确保日期格式
+        if isinstance(df.index, pd.MultiIndex):
+            dates = df.index.get_level_values('date')
+        elif date_col in df.columns:
+            dates = pd.to_datetime(df[date_col])
+        else:
+            dates = pd.to_datetime(df.index)
+        
+        # 找出非交易日
+        non_trading_days = dates[~dates.isin(self.trading_calendar)]
+        
+        if len(non_trading_days) > 0:
+            print(f"   ⚠️  发现 {len(non_trading_days)} 个非交易日")
+            
+            # 移除非交易日
+            if isinstance(df.index, pd.MultiIndex):
+                mask = df.index.get_level_values('date').isin(self.trading_calendar)
+                df = df[mask]
+            else:
+                mask = dates.isin(self.trading_calendar)
+                df = df[mask]
+        
+        print(f"   ✓ 对齐完成，剩余 {len(df)} 个交易日")
+        
+        return df
+    
     def align_index_constituents(self,
                                 index_history: pd.DataFrame,
                                 effective_date_col: str = 'effective_date') -> pd.DataFrame:
         """
         对齐指数成分股历史数据（避免幸存者偏差）
+        
+        用途：研究宪章 §1.1.2 - 历史成分变更处理
+        - 扩展至沪深300/中证500时必需
+        - 回测时使用时点成分（point-in-time）
         
         Parameters:
         -----------
@@ -170,6 +226,10 @@ class PITDataAligner:
         """
         应用后复权因子
         
+        用途：研究宪章核心原则 - 价格数据后复权处理
+        - 确保时间一致性
+        - 分红、送股等调整
+        
         Parameters:
         -----------
         price_df : pd.DataFrame
@@ -202,60 +262,16 @@ class PITDataAligner:
         
         return df
     
-    def align_to_trading_calendar(self,
-                                 data: pd.DataFrame,
-                                 date_col: str = 'date') -> pd.DataFrame:
-        """
-        对齐到交易日历
-        
-        Parameters:
-        -----------
-        data : pd.DataFrame
-            数据
-        date_col : str
-            日期列名
-            
-        Returns:
-        --------
-        pd.DataFrame
-            对齐后的数据
-        """
-        print(f"\n📅 对齐到交易日历")
-        
-        df = data.copy()
-        
-        # 确保日期格式
-        if isinstance(df.index, pd.MultiIndex):
-            dates = df.index.get_level_values('date')
-        elif date_col in df.columns:
-            dates = pd.to_datetime(df[date_col])
-        else:
-            dates = pd.to_datetime(df.index)
-        
-        # 找出非交易日
-        non_trading_days = dates[~dates.isin(self.trading_calendar)]
-        
-        if len(non_trading_days) > 0:
-            print(f"   ⚠️  发现 {len(non_trading_days)} 个非交易日")
-            
-            # 移除非交易日或前向填充
-            if isinstance(df.index, pd.MultiIndex):
-                mask = df.index.get_level_values('date').isin(self.trading_calendar)
-                df = df[mask]
-            else:
-                mask = dates.isin(self.trading_calendar)
-                df = df[mask]
-        
-        print(f"   ✓ 对齐完成，剩余 {len(df)} 个交易日")
-        
-        return df
-    
     def forward_fill_pit(self,
                         data: pd.DataFrame,
                         group_col: str = 'ticker',
                         max_fill_days: int = 5) -> pd.DataFrame:
         """
         前向填充（PIT安全）
+        
+        用途：数据预处理 - 缺失值填充
+        - 限制填充天数防止信息泄漏
+        - 多股票场景按ticker分组填充
         
         Parameters:
         -----------
@@ -399,15 +415,24 @@ if __name__ == "__main__":
     print(f"\n✅ 财务数据对齐完成")
     print(aligned_financial[['report_date', 'announce_date', 'effective_date']])
     
-    # 创建示例成分股数据
+    # 测试成分股对齐（未来扩展）
     index_history = pd.DataFrame({
         'date': pd.date_range('2023-01-01', '2023-12-31', freq='M'),
         'ticker': '000001',
         'in_index': [1] * 12
     })
-    
-    # 对齐成分股数据
     aligned_constituents = pit_aligner.align_index_constituents(index_history)
+    print(f"\n✅ 成分股对齐完成: {len(aligned_constituents)} 条")
     
-    print(f"\n✅ 成分股数据对齐完成")
-    print(aligned_constituents.head())
+    # 验证PIT对齐
+    test_data = pd.DataFrame({
+        'date': pd.date_range('2023-01-01', '2024-12-31', freq='D'),
+        'feature1': np.random.randn(731),
+        'future_return_5d': np.random.randn(731)
+    })
+    test_data.loc[test_data.index[-5:], 'future_return_5d'] = np.nan
+    test_data = test_data.set_index('date')
+    
+    validation_results = pit_aligner.validate_pit_alignment(test_data)
+    print(f"\n✅ PIT验证结果: {validation_results}")
+

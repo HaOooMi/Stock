@@ -136,33 +136,6 @@ class DataLoader:
         print(f"   PIT对齐: {'✅' if enable_pit_alignment else '❌'}")
         print(f"   市场数据: {'✅' if self.market_data_loader is not None else '❌'}")
     
-    def _load_csv_with_encoding(self, file_path: str) -> pd.DataFrame:
-        """
-        尝试多种编码读取CSV文件
-        
-        Parameters:
-        -----------
-        file_path : str
-            文件路径
-            
-        Returns:
-        --------
-        pd.DataFrame
-            读取的数据
-        """
-        encodings = ['utf-8', 'gbk', 'latin1', 'cp1252']
-        
-        for encoding in encodings:
-            try:
-                return pd.read_csv(file_path, index_col=0, parse_dates=True, encoding=encoding)
-            except UnicodeDecodeError:
-                continue
-            except Exception as e:
-                if encoding == encodings[-1]:
-                    raise Exception(f"无法读取CSV文件 {file_path}: {str(e)}")
-        
-        raise Exception(f"无法以任何支持的编码读取CSV文件: {file_path}")
-    
     def load_features_and_targets(self, 
                                   symbol: str,
                                   target_col: str = 'future_return_5d',
@@ -222,8 +195,8 @@ class DataLoader:
             feature_file = os.path.join(self.data_root, target_files[0])
             print(f"   📈 加载特征: {target_files[0]}")
         
-        # 加载特征数据（尝试多种编码）
-        features_df = self._load_csv_with_encoding(feature_file)
+        # 加载特征数据
+        features_df = pd.read_csv(feature_file, index_col=0, parse_dates=True, encoding='utf-8')
         
         # 2. 加载目标数据（从 datasets 目录）
         target_pattern = f"with_targets_{symbol}_complete_*.csv"
@@ -239,8 +212,8 @@ class DataLoader:
         target_file = os.path.join(self.data_root, target_files[0])
         print(f"   🎯 加载目标: {target_files[0]}")
         
-        # 加载目标数据（尝试多种编码）
-        targets_df = self._load_csv_with_encoding(target_file)
+        # 加载目标数据
+        targets_df = pd.read_csv(target_file, index_col=0, parse_dates=True, encoding='utf-8')
         
         # 3. 检查目标列是否存在
         if target_col not in targets_df.columns:

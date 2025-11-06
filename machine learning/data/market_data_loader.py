@@ -29,9 +29,9 @@ if project_root not in sys.path:
 # 尝试导入 get_stock_info 中的工具函数
 try:
     sys.path.insert(0, os.path.join(project_root, 'get_stock_info'))
-    from utils import get_influxdb_client, get_mysql_engine
-    from stock_market_data_akshare import get_history_data
-    from stock_meta_akshare import get_basic_info_mysql
+    from get_stock_info.utils import get_influxdb_client, get_mysql_engine
+    from get_stock_info.stock_market_data_akshare import get_history_data
+    from get_stock_info.stock_meta_akshare import get_basic_info_mysql
     HAVE_GET_STOCK_INFO = True
 except ImportError:
     HAVE_GET_STOCK_INFO = False
@@ -180,67 +180,7 @@ class MarketDataLoader:
                 print(f"   ❌ 加载失败: {e}")
                 return pd.DataFrame()
         else:
-            # 备用方案：直接查询
-            return self._load_market_data_direct(symbol, start_date, end_date)
-    
-    def _load_market_data_direct(self,
-                                 symbol: str,
-                                 start_date: str,
-                                 end_date: str) -> pd.DataFrame:
-        """
-        直接从 InfluxDB 查询市场数据（备用方案）
-        """
-        flux_query = f'''
-            from(bucket: "{self.bucket}")
-              |> range(start: {start_date}T00:00:00Z, stop: {end_date}T23:59:59Z)
-              |> filter(fn: (r) => r._measurement == "history_kdata")
-              |> filter(fn: (r) => r.股票代码 == "{symbol}")
-              |> pivot(
-                  rowKey:["_time"],
-                  columnKey: ["_field"],
-                  valueColumn: "_value"
-              )
-              |> keep(columns: ["_time", "开盘", "收盘", "最高", "最低", "成交量", "成交额", "振幅", "涨跌幅", "涨跌额", "换手率", "是否停牌"])
-        '''
-        
-        try:
-            df = self.query_api.query_data_frame(query=flux_query)
-            
-            if df.empty:
-                return pd.DataFrame()
-            
-            # 重命名列
-            column_map = {
-                '_time': 'date',
-                '开盘': 'open',
-                '收盘': 'close',
-                '最高': 'high',
-                '最低': 'low',
-                '成交量': 'volume',
-                '成交额': 'amount',
-                '振幅': 'amplitude',
-                '涨跌幅': 'pct_change',
-                '涨跌额': 'change',
-                '换手率': 'turnover',
-                '是否停牌': 'is_suspended'
-            }
-            
-            df = df.rename(columns=column_map)
-            
-            # 删除不需要的列
-            cols_to_keep = ['date', 'open', 'high', 'low', 'close', 'volume', 
-                          'amount', 'pct_change', 'turnover', 'amplitude']
-            df = df[[col for col in cols_to_keep if col in df.columns]]
-            
-            # 处理时间格式
-            df['date'] = pd.to_datetime(df['date'])
-            df = df.set_index('date')
-            df = df.sort_index()
-            
-            return df
-            
-        except Exception as e:
-            print(f"   ❌ 查询失败: {e}")
+            print(f"   ❌ get_stock_info 模块未导入")
             return pd.DataFrame()
     
     def _enrich_with_metadata(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:

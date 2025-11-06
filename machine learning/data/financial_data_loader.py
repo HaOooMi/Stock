@@ -27,8 +27,8 @@ if project_root not in sys.path:
 # 尝试导入 get_stock_info 中的工具函数
 try:
     sys.path.insert(0, os.path.join(project_root, 'get_stock_info'))
-    from utils import get_mysql_engine
-    from stock_meta_akshare import get_financial_info_mysql
+    from get_stock_info.utils import get_mysql_engine
+    from get_stock_info.stock_meta_akshare import get_financial_info_mysql
     HAVE_GET_STOCK_INFO = True
 except ImportError:
     HAVE_GET_STOCK_INFO = False
@@ -262,9 +262,12 @@ class FinancialDataLoader:
         
         return aligned_df
     
-    def get_latest_financial_data(self, symbol: str, as_of_date: str) -> Dict:
+    def query_financial_data(self, 
+                            symbol: str, 
+                            as_of_date: str,
+                            query_type: str = 'latest') -> Dict:
         """
-        获取指定日期的最新财务数据（PIT 原则）
+        统一财务数据查询接口（合并 get_latest_financial_data 等）
         
         Parameters:
         -----------
@@ -272,29 +275,47 @@ class FinancialDataLoader:
             股票代码
         as_of_date : str
             查询日期
+        query_type : str
+            查询类型: 'latest', 'all', 'summary'
             
         Returns:
         --------
-        dict
-            最新的财务数据
+        dict or pd.DataFrame
+            查询结果
         """
         df = self.load_financial_data(symbol)
         
         if df.empty:
-            return {}
+            return {} if query_type != 'all' else pd.DataFrame()
         
         as_of_date = pd.to_datetime(as_of_date)
         
-        # 找到生效日期 <= as_of_date 的最新财务数据
-        valid_data = df[df['effective_date'] <= as_of_date]
+        if query_type == 'latest':
+            # 最新一期财务数据
+            valid_data = df[df['effective_date'] <= as_of_date]
+            if valid_data.empty:
+                return {}
+            latest = valid_data.sort_values('effective_date', ascending=False).iloc[0]
+            return latest.to_dict()
         
-        if valid_data.empty:
-            return {}
+        elif query_type == 'all':
+            # 所有有效财务数据
+            return df[df['effective_date'] <= as_of_date]
         
-        # 返回最新一期
-        latest = valid_data.sort_values('effective_date', ascending=False).iloc[0]
+        elif query_type == 'summary':
+            # 财务指标摘要
+            valid_data = df[df['effective_date'] <= as_of_date]
+            if valid_data.empty:
+                return {}
+            return {
+                'count': len(valid_data),
+                'latest_report': valid_data['report_date'].max(),
+                'latest_effective': valid_data['effective_date'].max(),
+                'avg_roe': valid_data['roe'].mean() if 'roe' in valid_data.columns else None
+            }
         
-        return latest.to_dict()
+        else:
+            raise ValueError(f"不支持的查询类型: {query_type}")
 
 
 if __name__ == "__main__":
@@ -328,13 +349,14 @@ if __name__ == "__main__":
             print(f"\n✅ 特征计算完成:")
             print(f"   新增特征: {set(df_with_features.columns) - set(df.columns)}")
             
-            # 获取最新财务数据
-            latest = loader.get_latest_financial_data(symbol, "2024-06-30")
+            # 测试统一查询接口
+            latest = loader.query_financial_data(symbol, "2024-06-30", 'latest')
+            summary = loader.query_financial_data(symbol, "2024-06-30", 'summary')
             if latest:
-                print(f"\n✅ 最新财务数据 (截至 2024-06-30):")
-                print(f"   报告期: {latest.get('report_date')}")
+                print(f"\n✅ 财务查询:")
+                print(f"   最新报告期: {latest.get('report_date')}")
                 print(f"   ROE: {latest.get('roe')}")
-                print(f"   净利润同比: {latest.get('net_profit_yoy')}")
+                print(f"   数据摘要: {summary}")
         else:
             print(f"\n⚠️  未找到财务数据，请先运行数据采集:")
             print(f"   python get_stock_info/main.py")
