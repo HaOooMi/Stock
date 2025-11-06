@@ -251,15 +251,22 @@ class DataLoader:
         
         return features_clean, targets_clean
     
-    def _load_market_data_from_influxdb(self,
-                                       symbol: str,
-                                       start_date: str,
-                                       end_date: str) -> pd.DataFrame:
+    def _load_and_merge_market_data(self,
+                                    features: pd.DataFrame,
+                                    symbol: str,
+                                    start_date: str,
+                                    end_date: str) -> pd.DataFrame:
         """
-        从 InfluxDB 加载市场数据
+        加载市场数据并合并到特征（InfluxDB + MySQL）
+        
+        注：调用 MarketDataLoader.load_market_data()，该方法会：
+        1. 从 InfluxDB 加载 OHLCV 数据
+        2. 从 MySQL 加载元数据（ST状态、上市日期、总股本等）
         
         Parameters:
         -----------
+        features : pd.DataFrame
+            现有特征数据，MultiIndex [date, ticker]
         symbol : str
             股票代码
         start_date : str
@@ -270,60 +277,46 @@ class DataLoader:
         Returns:
         --------
         pd.DataFrame
-            市场数据，索引为日期
+            合并后的特征数据
         """
         if self.market_data_loader is None:
             print(f"   ⚠️  市场数据加载器未启用，跳过市场数据加载")
-            return pd.DataFrame()
+            return features
         
         try:
+            # 加载市场数据（InfluxDB + MySQL）
             market_df = self.market_data_loader.load_market_data(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date
             )
-            return market_df
-        except Exception as e:
-            print(f"   ⚠️  从市场数据源加载数据失败: {e}")
-            return pd.DataFrame()
-    
-    def _merge_market_data(self,
-                          features: pd.DataFrame,
-                          market_df: pd.DataFrame,
-                          symbol: str) -> pd.DataFrame:
-        """
-        合并市场数据到特征数据
-        
-        Parameters:
-        -----------
-        features : pd.DataFrame
-            特征数据，MultiIndex [date, ticker]
-        market_df : pd.DataFrame
-            市场数据，索引为日期
-        symbol : str
-            股票代码
             
-        Returns:
-        --------
-        pd.DataFrame
-            合并后的数据
-        """
-        if market_df.empty:
-            return features
-        
-        # 提取特征数据的日期索引
-        dates = features.index.get_level_values('date')
-        
-        # 对齐市场数据到特征数据的日期
-        market_aligned = market_df.reindex(dates)
-        
-        # 添加需要的列到特征数据
-        # 注意：不覆盖已存在的列
-        for col in market_aligned.columns:
-            if col not in features.columns:
-                features[col] = market_aligned[col].values
-        
-        print(f"   ✅ 市场数据合并完成: 添加 {len(market_aligned.columns)} 列")
+            if market_df.empty:
+                print(f"   ⚠️  未找到市场数据")
+                return features
+            
+            # 提取特征数据的日期索引（去重）
+            unique_dates = features.index.get_level_values('date').unique()
+            
+            # 对齐市场数据到特征数据的日期
+            market_aligned = market_df.reindex(unique_dates)
+            
+            # 添加需要的列到特征数据（考虑 MultiIndex）
+            # 注意：不覆盖已存在的列
+            added_cols = []
+            for col in market_aligned.columns:
+                if col not in features.columns:
+                    # 从 MultiIndex 中提取日期，然后从 market_aligned 中获取对应值
+                    feature_dates = features.index.get_level_values('date')
+                    features[col] = market_aligned[col].reindex(feature_dates).values
+                    added_cols.append(col)
+            
+            print(f"   ✅ 市场数据合并完成: 添加 {len(added_cols)} 列")
+            if added_cols:
+                print(f"      新增列: {', '.join(added_cols[:5])}{'...' if len(added_cols) > 5 else ''}")
+            
+        except Exception as e:
+            print(f"   ⚠️  市场数据加载失败: {e}")
         
         return features
     
@@ -550,18 +543,15 @@ class DataLoader:
             use_scaled=use_scaled
         )
         
-        # 2. 从市场数据源加载数据（InfluxDB + MySQL）
+        # 2. 加载并合并市场数据（InfluxDB OHLCV + MySQL 元数据）
         if self.enable_influxdb and self.market_data_loader is not None:
             print(f"\n[市场数据] 加载 InfluxDB + MySQL 数据")
-            market_df = self._load_market_data_from_influxdb(
+            features = self._load_and_merge_market_data(
+                features=features,
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date
             )
-            
-            if not market_df.empty:
-                # 合并市场数据到特征数据
-                features = self._merge_market_data(features, market_df, symbol)
         
         # 3. 加载并合并财务数据（PIT对齐）
         if self.enable_pit_alignment:
@@ -584,7 +574,7 @@ class DataLoader:
                 f'filter_log_{symbol}.csv'
             )
             
-            filtered_data, filter_log = self.filter_engine.apply_filters(
+            filtered_data, _ = self.filter_engine.apply_filters(
                 combined_data,
                 save_log=True,
                 log_path=filter_log_path
@@ -625,7 +615,7 @@ class DataLoader:
             }
             
             # 创建快照
-            snapshot_path = self.snapshot_mgr.create_snapshot(
+            _ = self.snapshot_mgr.create_snapshot(
                 data=snapshot_data,
                 symbol=symbol,
                 start_date=start_date,
