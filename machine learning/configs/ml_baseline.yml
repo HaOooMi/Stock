@@ -40,7 +40,9 @@ paths:
   
 # ===================== 数据配置 =====================
 data:
-  # 股票代码
+  # 股票代码（支持单标的和多标的）
+  # 单标的模式：symbol: "000001"
+  # 多标的模式：symbol: ["000001", "600000", "000858"]
   symbol: "000001"
   
   # 时间窗口
@@ -156,7 +158,7 @@ evaluation:
   # 分桶设置
   n_buckets: 5               # 分桶数量
   bucket_method: "quantile"  # 分桶方法：'quantile' 或 'equal_width'
-  daily_bucketing: true      # 按日横截面分桶
+  daily_bucketing: true      # 按日横截面分桶（多标的模式必须为true）
   
   # 评估指标
   metrics:

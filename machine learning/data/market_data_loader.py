@@ -221,14 +221,12 @@ class MarketDataLoader:
                     if list_date:
                         df['list_date'] = pd.to_datetime(list_date)
                     
-                    # 添加总股本（用于计算换手率）
+                    # 添加总股本（用于后续可能的计算）
                     shares_outstanding = stock_info.get('总股本')
                     if shares_outstanding:
                         df['shares_outstanding'] = float(shares_outstanding)
-                        
-                        # 计算换手率（如果还没有）
-                        if 'turnover_rate' not in df.columns and 'volume' in df.columns:
-                            df['turnover_rate'] = df['volume'] / df['shares_outstanding']
+                        # 注意：换手率已经从InfluxDB加载（'换手率' -> 'turnover'）
+                        # 无需重复计算
                     
                     print(f"   ✓ 元数据添加完成")
                     
@@ -332,6 +330,78 @@ class MarketDataLoader:
             print(f"   ⚠️  查询上市时间失败: {e}")
         
         return None
+    
+    def load_market_data_batch(self,
+                               symbols: List[str],
+                               start_date: str,
+                               end_date: str) -> pd.DataFrame:
+        """
+        批量加载多个股票的市场数据（多标的支持）
+        
+        Parameters:
+        -----------
+        symbols : List[str]
+            股票代码列表
+        start_date : str
+            开始日期 (YYYY-MM-DD)
+        end_date : str
+            结束日期 (YYYY-MM-DD)
+            
+        Returns:
+        --------
+        pd.DataFrame
+            MultiIndex [date, ticker] 格式的市场数据
+        """
+        print(f"📊 批量加载市场数据: {len(symbols)} 个股票")
+        print(f"   时间范围: {start_date} ~ {end_date}")
+        
+        all_data = []
+        
+        for i, symbol in enumerate(symbols, 1):
+            print(f"\n[{i}/{len(symbols)}] 加载 {symbol}")
+            
+            try:
+                df = self.load_market_data(symbol, start_date, end_date)
+                
+                if df.empty:
+                    print(f"   ⚠️  {symbol} 无数据")
+                    continue
+                
+                # 添加 ticker 列
+                df['ticker'] = symbol
+                
+                # 重置索引
+                df = df.reset_index()
+                if 'timestamp' in df.columns:
+                    df = df.rename(columns={'timestamp': 'date'})
+                
+                all_data.append(df)
+                
+                print(f"   ✅ {symbol} 完成: {len(df)} 条记录")
+                
+            except Exception as e:
+                print(f"   ❌ {symbol} 失败: {e}")
+                continue
+        
+        if not all_data:
+            print(f"   ⚠️  所有股票都无数据")
+            return pd.DataFrame()
+        
+        # 合并所有股票
+        print(f"\n📊 合并 {len(all_data)} 个股票的数据")
+        combined_df = pd.concat(all_data, ignore_index=True)
+        
+        # 设置 MultiIndex
+        if 'date' in combined_df.columns and 'ticker' in combined_df.columns:
+            combined_df['date'] = pd.to_datetime(combined_df['date'])
+            combined_df = combined_df.set_index(['date', 'ticker'])
+            combined_df = combined_df.sort_index()
+        
+        print(f"✅ 批量加载完成")
+        print(f"   总样本数: {len(combined_df):,}")
+        print(f"   股票数: {combined_df.index.get_level_values('ticker').nunique()}")
+        
+        return combined_df
     
     def close(self):
         """关闭 InfluxDB 连接"""

@@ -131,7 +131,7 @@ class FeatureEngineer:
             if df.empty:
                 raise ValueError(f"未找到股票 {symbol} 在指定时间范围内的数据")
             
-            # 标准化列名 
+            # 标准化列名（完整映射InfluxDB的所有字段）
             column_mapping = {
                 '日期': 'timestamp',
                 '开盘': 'open', 
@@ -139,7 +139,12 @@ class FeatureEngineer:
                 '最高': 'high',
                 '最低': 'low', 
                 '成交量': 'volume',
-                '成交额': 'turnover'
+                '成交额': 'amount',      # 注意：成交额映射为amount
+                '振幅': 'amplitude',
+                '涨跌幅': 'pct_change',   # 涨跌幅直接可用
+                '涨跌额': 'change',
+                '换手率': 'turnover',     # 换手率才是turnover
+                '是否停牌': 'is_suspended'
             }
             
             # 重命名存在的列
@@ -175,7 +180,8 @@ class FeatureEngineer:
             raise
 
     def prepare_features(self, data: pd.DataFrame, use_auto_features: bool = True, 
-                        window_size: int = 20, max_auto_features: int = 50) -> pd.DataFrame:
+                        window_size: int = 20, max_auto_features: int = 50,
+                        keep_base_columns: bool = True) -> pd.DataFrame:
         """
         统一特征生成方法 - 支持手工特征和可选的自动特征
         
@@ -189,6 +195,8 @@ class FeatureEngineer:
             自动特征生成的滑动窗口大小
         max_auto_features : int, default=50
             自动特征的最大数量
+        keep_base_columns : bool, default=True
+            是否保留基础列（volume、amount等）用于过滤
         
         Returns:
         --------
@@ -293,19 +301,33 @@ class FeatureEngineer:
         data['bb_position'] = (data['close'] - data['bb_lower']) / (data['bb_upper'] - data['bb_lower'] + 1e-8)
         data['bb_width'] = (data['bb_upper'] - data['bb_lower']) / data['bb_middle']
         
-        # 清理无用列
-        feature_columns = [col for col in data.columns 
-                          if col not in ['datetime', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'open_interest']]
+        # 清理无用列（排除原始OHLCV和基础信息列）
+        base_data_cols = ['datetime', 'open', 'high', 'low', 'close', 'volume', 
+                         'amount', 'turnover', 'pct_change', 'amplitude', 
+                         'change', 'is_suspended', 'open_interest']
+        feature_columns = [col for col in data.columns if col not in base_data_cols]
 
         # 为避免当期信息泄漏，所有特征整体滞后1期（决策时只能看到上一日的特征）
         if feature_columns:
             data[feature_columns] = data[feature_columns].shift(1)
         
+        # 确定保留的基础列（用于后续交易可行性过滤）
+        base_columns = []
+        if keep_base_columns:
+            # 保留关键的市场数据列（优先使用InfluxDB原生字段）
+            potential_base_cols = ['volume', 'amount', 'turnover', 'pct_change']
+            for col in potential_base_cols:
+                if col in data.columns:
+                    base_columns.append(col)
+        
         # 创建手工特征结果，保持时间索引一致性
-        manual_result = data[['close'] + feature_columns].dropna()
+        result_columns = ['close'] + base_columns + feature_columns
+        manual_result = data[result_columns].dropna()
         # 为了后续匹配，添加一个数值索引列作为时间戳
         manual_result['time_idx'] = range(len(manual_result))
         print(f"   ✅ 手工特征生成完成，特征数量: {len(feature_columns)}")
+        if base_columns:
+            print(f"   📊 保留基础列: {base_columns}")
         
         # === 2. 自动特征生成（可选）===
         if use_auto_features and self.use_tsfresh:
@@ -432,6 +454,110 @@ class FeatureEngineer:
         print(f"✅ 特征生成完成，手工特征数量: {feature_count}")
         
         return manual_result
+
+    def prepare_features_batch(self, 
+                              symbols: List[str],
+                              start_date: str,
+                              end_date: str,
+                              use_auto_features: bool = False,
+                              window_size: int = 20,
+                              max_auto_features: int = 50,
+                              keep_base_columns: bool = True) -> pd.DataFrame:
+        """
+        批量生成多个股票的特征（多标的支持）
+        
+        Parameters:
+        -----------
+        symbols : List[str]
+            股票代码列表
+        start_date : str
+            开始日期
+        end_date : str
+            结束日期
+        use_auto_features : bool
+            是否使用自动特征
+        window_size : int
+            自动特征窗口大小
+        max_auto_features : int
+            最大自动特征数
+        keep_base_columns : bool
+            是否保留基础列
+            
+        Returns:
+        --------
+        pd.DataFrame
+            MultiIndex [date, ticker] 格式的特征数据
+        """
+        print(f"\n🔨 批量特征生成: {len(symbols)} 个股票")
+        print(f"   时间范围: {start_date} ~ {end_date}")
+        
+        all_features = []
+        
+        for i, symbol in enumerate(symbols, 1):
+            print(f"\n[{i}/{len(symbols)}] 处理 {symbol}")
+            
+            try:
+                # 加载单个股票数据
+                raw_data = self.load_stock_data(symbol, start_date, end_date)
+                
+                if raw_data.empty:
+                    print(f"   ⚠️  {symbol} 无数据，跳过")
+                    continue
+                
+                # 生成特征
+                features_df = self.prepare_features(
+                    raw_data,
+                    use_auto_features=use_auto_features,
+                    window_size=window_size,
+                    max_auto_features=max_auto_features,
+                    keep_base_columns=keep_base_columns
+                )
+                
+                if features_df.empty:
+                    print(f"   ⚠️  {symbol} 特征生成失败，跳过")
+                    continue
+                
+                # 添加 ticker 列
+                features_df['ticker'] = symbol
+                
+                # 重置索引以便后续设置 MultiIndex
+                features_df = features_df.reset_index()
+                if 'timestamp' in features_df.columns:
+                    features_df = features_df.rename(columns={'timestamp': 'date'})
+                elif features_df.index.name == 'timestamp':
+                    features_df.index.name = 'date'
+                
+                all_features.append(features_df)
+                
+                print(f"   ✅ {symbol} 完成: {len(features_df)} 条记录")
+                
+            except Exception as e:
+                print(f"   ❌ {symbol} 失败: {e}")
+                continue
+        
+        if not all_features:
+            raise ValueError("批量特征生成失败：所有股票都无数据")
+        
+        # 合并所有股票
+        print(f"\n📊 合并 {len(all_features)} 个股票的特征")
+        combined_df = pd.concat(all_features, ignore_index=True)
+        
+        # 设置 MultiIndex [date, ticker]
+        if 'date' in combined_df.columns and 'ticker' in combined_df.columns:
+            combined_df['date'] = pd.to_datetime(combined_df['date'])
+            combined_df = combined_df.set_index(['date', 'ticker'])
+            combined_df = combined_df.sort_index()
+        else:
+            raise ValueError("合并后的数据缺少 date 或 ticker 列")
+        
+        print(f"✅ 批量特征生成完成")
+        print(f"   总样本数: {len(combined_df):,}")
+        print(f"   特征数: {len(combined_df.columns)}")
+        print(f"   股票数: {combined_df.index.get_level_values('ticker').nunique()}")
+        print(f"   时间范围: {combined_df.index.get_level_values('date').min().date()} ~ "
+              f"{combined_df.index.get_level_values('date').max().date()}")
+        
+        return combined_df
 
     def select_features(self, features_df: pd.DataFrame, final_k: int = 20,
                        variance_threshold: float = 0.01, correlation_threshold: float = 0.95,

@@ -67,12 +67,15 @@ class TargetEngineer:
                                periods: List[int] = [1, 5, 10],
                                price_col: str = 'close') -> pd.DataFrame:
         """
-        生成未来收益率目标变量
+        生成未来收益率目标变量（支持 MultiIndex）
         
         Parameters:
         -----------
         data : pd.DataFrame
-            包含价格数据的DataFrame，需要有时间索引
+            包含价格数据的DataFrame
+            支持两种索引格式：
+            - DatetimeIndex (单标的)
+            - MultiIndex [date, ticker] (多标的)
         periods : list, default=[1, 5, 10]
             未来收益率的时间窗口（天数）
         price_col : str, default='close'
@@ -91,31 +94,57 @@ class TargetEngineer:
         # 复制数据以避免修改原始数据
         result_df = data.copy()
         
-        # 确保数据按时间排序
-        if not result_df.index.is_monotonic_increasing:
-            result_df = result_df.sort_index()
-            print("   📅 数据已按时间排序")
+        # 判断是否为 MultiIndex（多标的）
+        is_multi_index = isinstance(result_df.index, pd.MultiIndex)
         
-        print(f"   🔢 生成 {len(periods)} 个时间窗口的未来收益率")
-        
-        # 生成各个时间窗口的未来收益率
-        for period in periods:
-            target_col = f'future_return_{period}d'
+        if is_multi_index:
+            print("   📊 检测到 MultiIndex 格式，使用分组计算")
+            # 对每个 ticker 分组计算，避免跨标的泄漏
             
-            # 计算未来收益率：shift(-period) 表示向前移动period天
-            # 即：今天的目标 = (period天后的价格 - 今天价格) / 今天价格
-            future_prices = result_df[price_col].shift(-period)
-            current_prices = result_df[price_col]
+            for period in periods:
+                target_col = f'future_return_{period}d'
+                
+                # 按 ticker 分组，计算未来收益率
+                def calc_future_return(group):
+                    future_prices = group[price_col].shift(-period)
+                    current_prices = group[price_col]
+                    return (future_prices - current_prices) / current_prices
+                
+                result_df[target_col] = result_df.groupby(level='ticker', group_keys=False).apply(calc_future_return)
+                
+                # 统计有效目标数量
+                valid_targets = result_df[target_col].notna().sum()
+                total_samples = len(result_df)
+                nan_samples = total_samples - valid_targets
+                
+                print(f"   📊 {target_col}: 有效样本 {valid_targets:,}, NaN样本 {nan_samples:,}")
+        else:
+            print("   📊 检测到 DatetimeIndex 格式，使用单标的计算")
+            # 确保数据按时间排序
+            if not result_df.index.is_monotonic_increasing:
+                result_df = result_df.sort_index()
+                print("   📅 数据已按时间排序")
             
-            # 计算收益率
-            result_df[target_col] = (future_prices - current_prices) / current_prices
+            print(f"   🔢 生成 {len(periods)} 个时间窗口的未来收益率")
             
-            # 统计有效目标数量
-            valid_targets = result_df[target_col].notna().sum()
-            total_samples = len(result_df)
-            nan_samples = total_samples - valid_targets
-            
-            print(f"   📊 {target_col}: 有效样本 {valid_targets}, NaN样本 {nan_samples} (尾部{period}行)")
+            # 生成各个时间窗口的未来收益率
+            for period in periods:
+                target_col = f'future_return_{period}d'
+                
+                # 计算未来收益率：shift(-period) 表示向前移动period天
+                # 即：今天的目标 = (period天后的价格 - 今天价格) / 今天价格
+                future_prices = result_df[price_col].shift(-period)
+                current_prices = result_df[price_col]
+                
+                # 计算收益率
+                result_df[target_col] = (future_prices - current_prices) / current_prices
+                
+                # 统计有效目标数量
+                valid_targets = result_df[target_col].notna().sum()
+                total_samples = len(result_df)
+                nan_samples = total_samples - valid_targets
+                
+                print(f"   📊 {target_col}: 有效样本 {valid_targets}, NaN样本 {nan_samples} (尾部{period}行)")
         
         # 验证尾部NaN的正确性
         self._verify_future_returns(result_df, periods)
@@ -128,12 +157,13 @@ class TargetEngineer:
                                      label_type: str = 'binary',
                                      quantiles: Optional[List[float]] = None) -> pd.DataFrame:
         """
-        基于未来收益率生成分类标签
+        基于未来收益率生成分类标签（支持 MultiIndex）
         
         Parameters:
         -----------
         data : pd.DataFrame
             包含未来收益率的数据
+            支持 DatetimeIndex 或 MultiIndex [date, ticker]
         target_cols : list, optional
             未来收益率列名列表，如果为None则自动检测
         label_type : str, default='binary'
@@ -157,7 +187,12 @@ class TargetEngineer:
         if not target_cols:
             raise ValueError("未找到未来收益率列，请先生成未来收益率")
         
+        # 判断是否为 MultiIndex
+        is_multi_index = isinstance(result_df.index, pd.MultiIndex)
+        
         print(f"   🎯 为 {len(target_cols)} 个目标生成 {label_type} 标签")
+        if is_multi_index:
+            print(f"   📊 MultiIndex 模式：按股票分别计算标签")
         
         if label_type == 'binary':
             # 二分类：涨(1) 跌(0)
@@ -179,27 +214,49 @@ class TargetEngineer:
             for col in target_cols:
                 label_col = col.replace('future_return_', 'label_quantile_')
                 
-                # 计算分位数阈值（只使用有效数据）
-                valid_data = result_df[col].dropna()
-                if len(valid_data) == 0:
-                    print(f"   ⚠️ {col} 没有有效数据，跳过分位数标签生成")
-                    continue
-                
-                thresholds = [valid_data.quantile(q) for q in quantiles]
-                
-                # 生成分位数标签
-                labels = pd.cut(result_df[col], 
-                              bins=[-np.inf] + thresholds + [np.inf], 
-                              labels=list(range(len(quantiles) + 1)),
-                              include_lowest=True).astype(float)
-                
-                result_df[label_col] = labels
-                
-                # 统计标签分布
-                valid_labels = result_df[label_col].notna()
-                if valid_labels.sum() > 0:
-                    label_counts = result_df.loc[valid_labels, label_col].value_counts().sort_index()
-                    print(f"   📊 {label_col} 分布: {dict(label_counts)}")
+                if is_multi_index:
+                    # MultiIndex: 按 ticker 分组计算分位数
+                    def calc_quantile_labels(group):
+                        valid_data = group[col].dropna()
+                        if len(valid_data) == 0:
+                            return pd.Series(np.nan, index=group.index)
+                        
+                        thresholds = [valid_data.quantile(q) for q in quantiles]
+                        labels = pd.cut(group[col], 
+                                      bins=[-np.inf] + thresholds + [np.inf], 
+                                      labels=list(range(len(quantiles) + 1)),
+                                      include_lowest=True).astype(float)
+                        return labels
+                    
+                    result_df[label_col] = result_df.groupby(level='ticker', group_keys=False).apply(calc_quantile_labels)
+                    
+                    # 统计标签分布（全局）
+                    valid_labels = result_df[label_col].notna()
+                    if valid_labels.sum() > 0:
+                        label_counts = result_df.loc[valid_labels, label_col].value_counts().sort_index()
+                        print(f"   📊 {label_col} 全局分布: {dict(label_counts)}")
+                else:
+                    # 单标的：直接计算
+                    valid_data = result_df[col].dropna()
+                    if len(valid_data) == 0:
+                        print(f"   ⚠️ {col} 没有有效数据，跳过分位数标签生成")
+                        continue
+                    
+                    thresholds = [valid_data.quantile(q) for q in quantiles]
+                    
+                    # 生成分位数标签
+                    labels = pd.cut(result_df[col], 
+                                  bins=[-np.inf] + thresholds + [np.inf], 
+                                  labels=list(range(len(quantiles) + 1)),
+                                  include_lowest=True).astype(float)
+                    
+                    result_df[label_col] = labels
+                    
+                    # 统计标签分布
+                    valid_labels = result_df[label_col].notna()
+                    if valid_labels.sum() > 0:
+                        label_counts = result_df.loc[valid_labels, label_col].value_counts().sort_index()
+                        print(f"   📊 {label_col} 分布: {dict(label_counts)}")
         
         else:
             raise ValueError("label_type 必须是 'binary' 或 'quantile'")

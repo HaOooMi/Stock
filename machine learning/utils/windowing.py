@@ -89,7 +89,7 @@ def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01",
             client.close()
             return None
         
-        # 标准化列名
+        # 标准化列名（完整映射InfluxDB字段）
         column_mapping = {
             '日期': 'datetime',
             '开盘': 'open',
@@ -97,7 +97,12 @@ def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01",
             '最低': 'low',
             '收盘': 'close',
             '成交量': 'volume',
-            '成交额': 'turnover'
+            '成交额': 'amount',      # 成交额是amount
+            '振幅': 'amplitude',
+            '涨跌幅': 'pct_change',
+            '涨跌额': 'change',
+            '换手率': 'turnover',    # 换手率才是turnover
+            '是否停牌': 'is_suspended'
         }
         
         df = df.rename(columns=column_mapping)
@@ -106,7 +111,9 @@ def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01",
         df['datetime'] = pd.to_datetime(df['datetime'])
         df = df.sort_values('datetime').reset_index(drop=True)
         
-        # 添加缺失的列
+        # 添加缺失的列（如果原始数据没有）
+        if 'amount' not in df.columns:
+            df['amount'] = 0.0
         if 'turnover' not in df.columns:
             df['turnover'] = 0.0
         
@@ -114,7 +121,7 @@ def load_real_stock_data(symbol: str = "000001", start_date: str = "2022-01-01",
         print(f"Date range: {df['datetime'].min().date()} to {df['datetime'].max().date()}")
         
         client.close()
-        return df[['datetime', 'open', 'high', 'low', 'close', 'volume', 'turnover']]
+        return df[['datetime', 'open', 'high', 'low', 'close', 'volume', 'amount', 'turnover']]
         
     except Exception as e:
         print(f"ERROR: Failed to load data from InfluxDB: {str(e)}")
