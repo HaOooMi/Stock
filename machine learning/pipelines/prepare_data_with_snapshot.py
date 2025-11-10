@@ -191,6 +191,27 @@ def main():
             print(f"\n🎉 恭喜! 数据清洗与快照层验收通过")
             print(f"   快照ID: {snapshot_id}")
             print(f"   可用于后续模型训练")
+            
+            # 8. 保存CSV格式数据集（用于后续 train_models.py）
+            print("\n[步骤8] 保存CSV格式数据集（用于模型训练）")
+            datasets_dir = config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1')
+            if not os.path.isabs(datasets_dir):
+                datasets_dir = os.path.join(ml_root, datasets_dir)
+            os.makedirs(datasets_dir, exist_ok=True)
+            
+            # 合并特征和目标
+            complete_df = features.copy()
+            complete_df[target_col] = targets
+            
+            # 保存为CSV
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_filename = f"with_targets_{symbol}_complete_{timestamp}.csv"
+            csv_path = os.path.join(datasets_dir, csv_filename)
+            complete_df.to_csv(csv_path)
+            
+            print(f"   ✅ CSV数据集已保存: {csv_path}")
+            print(f"   📊 形状: {complete_df.shape}")
+            print(f"   💡 此文件可用于 train_models.py 和 run_pca_state.py")
         else:
             print(f"\n⚠️  警告: 部分验收项未通过，请检查数据质量")
         
