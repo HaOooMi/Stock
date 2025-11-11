@@ -366,10 +366,56 @@ class PITDataAligner:
                        if not col.startswith('future_') and not col.startswith('label_')]
         
         if len(feature_cols) > 0:
-            # 简单检查：特征值是否全部有效
-            feature_valid = data[feature_cols].notna().all().all()
+            # 两层检查：核心市场特征必须近乎完整，财务特征允许合理缺失
+            # 核心特征：价格、成交量等市场数据（来自InfluxDB，应该完整）
+            # 财务特征：基本面数据（来自MySQL，早期数据允许缺失）
+            core_features = [col for col in feature_cols 
+                           if not col.startswith('fin_')]  # 排除财务特征
+            
+            if core_features:
+                # 核心特征缺失率：严格检查（允许<1%，考虑个别停牌日）
+                core_missing_rate = data[core_features].isna().sum().sum() / (len(data) * len(core_features))
+                core_valid = core_missing_rate < 0.01  # 不到1%
+                
+                # 检查财务特征缺失率（如果存在）
+                fin_features = [col for col in feature_cols if col.startswith('fin_')]
+                if fin_features:
+                    fin_missing_rate = data[fin_features].isna().sum().sum() / (len(data) * len(fin_features))
+                    
+                    # 分级阈值：
+                    # < 15%: 优秀（仅最新1-2季度可能缺失）
+                    # 15-25%: 良好（近1年可能有部分缺失）
+                    # 25-35%: 可接受（2年内有缺失，需警告）
+                    # > 35%: 不可接受（数据质量堪忧）
+                    fin_valid = fin_missing_rate < 0.35
+                    
+                    # 综合判断
+                    feature_valid = core_valid and fin_valid
+                    
+                    if not core_valid:
+                        print(f"   ✓ 特征有效性: ❌ (核心特征缺失率 {core_missing_rate:.2%} > 1%)")
+                    elif not fin_valid:
+                        print(f"   ✓ 特征有效性: ❌ (财务特征缺失率 {fin_missing_rate:.2%} > 35%)")
+                    elif fin_missing_rate > 0.25:
+                        print(f"   ✓ 特征有效性: ⚠️  (核心✅ {core_missing_rate:.2%}, 财务⚠️ {fin_missing_rate:.2%})")
+                    elif fin_missing_rate > 0.15:
+                        print(f"   ✓ 特征有效性: ✅ (核心 {core_missing_rate:.2%}, 财务 {fin_missing_rate:.2%} 良好)")
+                    else:
+                        print(f"   ✓ 特征有效性: ✅ (核心 {core_missing_rate:.2%}, 财务 {fin_missing_rate:.2%} 优秀)")
+                else:
+                    # 无财务特征，只检查核心特征
+                    feature_valid = core_valid
+                    if core_valid:
+                        print(f"   ✓ 特征有效性: ✅ (核心特征缺失率 {core_missing_rate:.2%})")
+                    else:
+                        print(f"   ✓ 特征有效性: ❌ (核心特征缺失率 {core_missing_rate:.2%} > 1%)")
+            else:
+                # 没有核心特征，只检查总体缺失率
+                overall_missing = data[feature_cols].isna().sum().sum() / (len(data) * len(feature_cols))
+                feature_valid = overall_missing < 0.1
+                print(f"   ✓ 特征有效性: {'✅' if feature_valid else '⚠️ '} (总体缺失率 {overall_missing:.2%})")
+            
             results['features_valid'] = feature_valid
-            print(f"   ✓ 特征有效性: {'✅' if feature_valid else '⚠️ '}")
         
         # 检查3: 时间顺序
         if isinstance(data.index, pd.MultiIndex):

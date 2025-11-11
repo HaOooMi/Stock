@@ -346,13 +346,15 @@ class DataSnapshot:
             'date_range': f"{dates.min().date()} ~ {dates.max().date()}"
         }
         
-        # 红灯：最大间隔 > 10天（可能存在数据缺失）
-        red_flag_gap = max_gap > 10 if not pd.isna(max_gap) else False
+        # 红灯：最大间隔 > 15天（考虑春节等长假期，10天→15天）
+        red_flag_gap = max_gap > 15 if not pd.isna(max_gap) else False
         report['checks']['time_continuity']['red_flag'] = bool(red_flag_gap)
         
         print(f"   ✓ 时间连续性: {len(dates)} 个交易日, 最大间隔 {max_gap} 天")
         if red_flag_gap:
-            print(f"     ⚠️  红灯: 最大间隔 > 10天")
+            print(f"     ⚠️  红灯: 最大间隔 > 15天")
+        elif max_gap > 10 and not pd.isna(max_gap):
+            print(f"     ℹ️  提示: 最大间隔 {max_gap} 天（可能是春节/长假期）")
         
         # 总体评分
         red_flags = sum([

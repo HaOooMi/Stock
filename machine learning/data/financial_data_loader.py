@@ -42,7 +42,7 @@ class FinancialDataLoader:
     从 MySQL 加载财务报表数据，并进行 PIT 对齐
     """
     
-    def __init__(self, announce_lag_days: int = 90):
+    def __init__(self, announce_lag_days: int = 90, ffill_limit: int = 95):
         """
         初始化财务数据加载器
         
@@ -50,14 +50,22 @@ class FinancialDataLoader:
         -----------
         announce_lag_days : int
             公告日后的滞后天数（默认90天），用于 PIT 对齐
+        ffill_limit : int
+            前向填充的最大天数（默认95天），略大于季报间隔（90天）以应对小幅延迟
+            设计考虑：
+            - 季报间隔：90天（正常情况）
+            - 小幅缓冲：+5天（应对周末、节假日等）
+            - 如果某公司超过95天仍无新财报，标记为NaN（可能存在披露问题）
         """
         self.announce_lag_days = announce_lag_days
+        self.ffill_limit = ffill_limit
         
         if not HAVE_GET_STOCK_INFO:
             raise ImportError("无法导入 get_stock_info 模块，请检查路径")
         
         print(f"📊 财务数据加载器初始化")
         print(f"   公告滞后天数: {announce_lag_days}")
+        print(f"   前向填充上限: {ffill_limit}天")
     
     def load_financial_data(self,
                            symbol: str,
@@ -243,22 +251,43 @@ class FinancialDataLoader:
         """
         print(f"📅 对齐财务数据到交易日")
         
+        # 🔧 统一时区：移除时区信息，避免比较错误
+        if trading_dates.tz is not None:
+            trading_dates = trading_dates.tz_localize(None)
+        
         # 设置 effective_date 为索引
         df = financial_df.set_index('effective_date').sort_index()
+        
+        # 确保索引也是naive datetime
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
         
         # 创建交易日 DataFrame
         aligned_df = pd.DataFrame(index=trading_dates)
         
         # 前向填充（使用最近一次公告的财务数据）
+        # limit: 最多填充self.ffill_limit个交易日（默认95天）
+        # 理由：
+        # 1. 季报间隔90天（正常情况下足够）
+        # 2. +5天缓冲（应对周末、节假日、小幅延迟）
+        # 3. 超过95天无新财报 → 标记NaN（可能存在披露问题，不应继续使用陈旧数据）
         for col in df.columns:
             if col not in ['report_date', 'announce_date', 'symbol']:
-                aligned_df[col] = df[col].reindex(trading_dates, method='ffill')
+                aligned_df[col] = df[col].reindex(trading_dates, method='ffill', limit=self.ffill_limit)
         
-        # 只保留有财务数据的日期（第一个财务数据生效后）
-        first_date = df.index.min()
-        aligned_df = aligned_df[aligned_df.index >= first_date]
+        # 不再过滤日期！保留所有交易日，让上层决定如何处理缺失
+        # 原因：第一个财务数据生效前的日期，NaN是正确的（真实世界确实没有财务数据）
+        first_date = df.index.min() if len(df) > 0 else None
         
-        print(f"   ✅ 对齐完成: {len(aligned_df)} 个交易日")
+        # 统计财务数据覆盖情况
+        if first_date:
+            covered_dates = aligned_df[aligned_df.index >= first_date]
+            coverage_rate = len(covered_dates) / len(aligned_df) if len(aligned_df) > 0 else 0
+            print(f"   ✅ 对齐完成: {len(aligned_df)} 个交易日")
+            print(f"      财务数据覆盖: {len(covered_dates)} 个交易日 ({coverage_rate:.1%})")
+            print(f"      首次生效: {first_date.date()}")
+        else:
+            print(f"   ✅ 对齐完成: {len(aligned_df)} 个交易日（无财务数据）")
         
         return aligned_df
     

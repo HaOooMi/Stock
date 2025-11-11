@@ -70,7 +70,8 @@ class DataLoader:
                  enable_pit_alignment: bool = True,
                  enable_influxdb: bool = True,
                  influxdb_config: Optional[Dict[str, str]] = None,
-                 filter_config: Optional[Dict[str, Any]] = None):
+                 filter_config: Optional[Dict[str, Any]] = None,
+                 pit_config: Optional[Dict[str, Any]] = None):
         """
         初始化数据加载器
         
@@ -90,6 +91,10 @@ class DataLoader:
             InfluxDB配置
         filter_config : dict, optional
             过滤器配置
+        pit_config : dict, optional
+            PIT对齐配置，包含:
+            - financial_lag_days: 财务数据滞后天数（默认90）
+            - financial_ffill_limit: 前向填充上限（默认95）
         """
         if os.path.isabs(data_root):
             self.data_root = data_root
@@ -101,6 +106,9 @@ class DataLoader:
         self.enable_filtering = enable_filtering
         self.enable_pit_alignment = enable_pit_alignment
         self.enable_influxdb = enable_influxdb
+        
+        # PIT配置
+        self.pit_config = pit_config or {}
         
         # 初始化市场数据加载器（InfluxDB + MySQL）
         if enable_influxdb and MarketDataLoader is not None:
@@ -380,8 +388,14 @@ class DataLoader:
             合并后的特征和目标
         """
         try:            
-            # 初始化财务数据加载器
-            financial_loader = FinancialDataLoader(announce_lag_days=90)
+            # 初始化财务数据加载器（从配置读取参数）
+            announce_lag_days = self.pit_config.get('financial_lag_days', 90)
+            ffill_limit = self.pit_config.get('financial_ffill_limit', 95)
+            
+            financial_loader = FinancialDataLoader(
+                announce_lag_days=announce_lag_days,
+                ffill_limit=ffill_limit
+            )
             
             # 加载财务数据
             financial_df = financial_loader.load_financial_data(
@@ -411,29 +425,30 @@ class DataLoader:
                     # 添加前缀避免列名冲突
                     new_col = f'fin_{col}'
                     if new_col not in features.columns:
-                        # 对齐索引
-                        feature_dates = features.index.get_level_values('date')
-                        aligned_values = aligned_financial[col].reindex(feature_dates)
-                        features[new_col] = aligned_values.values
+                        # 直接使用 aligned_financial 的值，因为它已经和交易日对齐过了
+                        # 长度相同则直接赋值，否则需要 reindex
+                        if len(features) == len(aligned_financial):
+                            features[new_col] = aligned_financial[col].values
+                        else:
+                            # 长度不同时需要重新对齐
+                            feature_dates = features.index.get_level_values('date')
+                            aligned_values = aligned_financial[col].reindex(feature_dates)
+                            features[new_col] = aligned_values.values
+                        
                         fin_cols_added.append(new_col)
             
-            # 对财务列进行限制式前向填充（避免过度填充导致未来泄漏）
+            # 财务数据的前向填充已在 FinancialDataLoader.align_to_trading_dates() 中完成
+            # 无需在此重复填充，避免覆盖已有的填充逻辑
             if fin_cols_added:
-                # 计算财务列初始缺失率
-                initial_fin_nans = features[fin_cols_added].isna().sum().sum()
-                
-                # 按ticker分组进行限制式前向填充（最多5天）
-                features[fin_cols_added] = features.groupby(level='ticker')[fin_cols_added].fillna(method='ffill', limit=5)
-                
-                # 计算填充后缺失率
-                final_fin_nans = features[fin_cols_added].isna().sum().sum()
-                filled_count = initial_fin_nans - final_fin_nans
+                # 计算财务列缺失率（仅统计，不再填充）
+                fin_nans = features[fin_cols_added].isna().sum().sum()
+                fin_total = len(features) * len(fin_cols_added)
+                fin_missing_rate = (fin_nans / fin_total * 100) if fin_total > 0 else 0
                 
                 print(f"   ✓ 财务特征合并完成: 添加 {len(fin_cols_added)} 个财务特征")
-                if initial_fin_nans > 0:
-                    print(f"      前向填充: {filled_count} 个缺失值 (限制5天)")
-                    if final_fin_nans > 0:
-                        print(f"      剩余缺失: {final_fin_nans} 个 (将被过滤)")
+                print(f"      财务数据缺失率: {fin_missing_rate:.2f}%")
+                if fin_nans > 0:
+                    print(f"      缺失样本数: {fin_nans} / {fin_total}")
             else:
                 print(f"   ✓ 财务特征合并完成: 未添加新列（可能已存在或无可用数据）")
             
@@ -610,8 +625,10 @@ class DataLoader:
             )
         
         # 4. 应用交易可行性过滤
+        # 注意：如果调用方传入 filters=None，表示已在之前的步骤完成过滤（通常在标准化前）
+        #       此时跳过重复过滤，避免用原始阈值对比标准化后的值
         initial_sample_count = len(features)
-        if self.enable_filtering and self.filter_engine is not None:
+        if filters is not None and self.enable_filtering and self.filter_engine is not None:
             # 合并特征和目标以便过滤
             combined_data = features.copy()
             combined_data[target_col] = targets
@@ -645,6 +662,8 @@ class DataLoader:
                 print(f"         2. 降低 min_turnover (当前: {self.filter_engine.min_turnover:.2%})")
                 print(f"         3. 降低 min_listing_days (当前: {self.filter_engine.min_listing_days})")
                 print(f"         4. 检查过滤日志: {filter_log_path}")
+        elif filters is None:
+            print(f"\n   ⏭️  跳过过滤器（已在标准化前完成）")
         
         # 4.5 PIT对齐前的统计（用于诊断）
         print(f"\n   📊 PIT验证前数据状态:")

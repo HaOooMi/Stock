@@ -1,39 +1,68 @@
 {
-  "timestamp": "2025-11-11T11:23:06.100388",
-  "total_samples": 0,
+  "timestamp": "2025-11-11T20:52:32.453140",
+  "total_samples": 1620,
   "checks": {
     "missing_ratio": {
-      "max": NaN,
-      "mean": NaN,
-      "columns_with_missing": {},
-      "red_flag": false
+      "max": 1.0,
+      "mean": 0.061651234567901246,
+      "columns_with_missing": {
+        "fin_net_profit": 0.8987654320987655,
+        "fin_net_profit_yoy": 0.004320987654320987,
+        "fin_net_profit_deducted": 0.6598765432098765,
+        "fin_net_profit_deducted_yoy": 0.004320987654320987,
+        "fin_revenue": 1.0,
+        "fin_revenue_yoy": 0.004320987654320987,
+        "fin_eps": 0.004320987654320987,
+        "fin_bps": 0.004320987654320987,
+        "fin_capital_reserve_ps": 0.004320987654320987,
+        "fin_undistributed_profit_ps": 0.004320987654320987,
+        "fin_ocf_ps": 0.004320987654320987,
+        "fin_net_profit_margin": 0.004320987654320987,
+        "fin_roe": 0.004320987654320987,
+        "fin_roe_diluted": 0.004320987654320987,
+        "fin_operating_cycle": 0.004320987654320987,
+        "fin_receivable_turnover_days": 0.14074074074074075,
+        "fin_current_ratio": 0.004320987654320987,
+        "fin_quick_ratio": 0.004320987654320987,
+        "fin_conservative_quick_ratio": 0.004320987654320987,
+        "fin_debt_to_equity": 0.004320987654320987,
+        "fin_debt_to_assets": 0.004320987654320987,
+        "fin_profit_quality": 0.004320987654320987,
+        "fin_roe_change": 0.025308641975308643,
+        "fin_roe_ma4": 0.004320987654320987,
+        "fin_leverage_ratio": 0.004320987654320987,
+        "fin_cash_earning_quality": 0.004320987654320987,
+        "fin_inventory_turnover_days": 0.14074074074074075,
+        "future_return_5d": 0.0030864197530864196
+      },
+      "red_flag": true
     },
     "extreme_values": {
-      "max": NaN,
-      "mean": NaN
+      "max": 0.020987654320987655,
+      "mean": 0.0091820987654321
     },
     "duplicates": {
       "count": 0,
-      "ratio": NaN,
+      "ratio": 0.0,
       "red_flag": false
     },
     "suspended": {
       "count": 0,
-      "ratio": NaN
+      "ratio": 0.0
     },
     "limit_moves": {
-      "limit_up": 0,
-      "limit_down": 0,
-      "total": 0,
-      "ratio": NaN
+      "limit_up": 715,
+      "limit_down": 740,
+      "total": 1455,
+      "ratio": 0.8981481481481481
     },
     "time_continuity": {
-      "n_dates": 0,
-      "max_gap_days": 0,
-      "date_range": "NaT ~ NaT",
-      "red_flag": false
+      "n_dates": 1620,
+      "max_gap_days": 66,
+      "date_range": "2018-02-26 ~ 2024-12-31",
+      "red_flag": true
     }
   },
-  "overall_quality": "PASS",
-  "red_flags_count": 0
+  "overall_quality": "WARNING",
+  "red_flags_count": 2
 }

@@ -69,7 +69,10 @@ data:
   # Point-in-Time (PIT) 对齐
   pit:
     enabled: true                   # 是否启用PIT对齐
-    financial_lag_days: 90          # 财务数据滞后天数
+    financial_lag_days: 90          # 财务数据滞后天数（公告日 + 90天 = 生效日期）
+    financial_ffill_limit: 95       # 财务数据前向填充上限（天数）
+                                     # 设计考虑：季报间隔90天 + 5天缓冲（周末/节假日）
+                                     # 超过此期限无新财报 → 标记为NaN（可能存在披露问题）
     use_adj_factor: true            # 使用前复权因子
     validate_alignment: true        # 验证PIT对齐
   
