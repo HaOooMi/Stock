@@ -195,7 +195,7 @@ class DataSnapshot:
         # 保存元数据
         metadata_file = os.path.join(snapshot_path, 'metadata.json')
         with open(metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(self.metadata, f, indent=2, ensure_ascii=False)
+            json.dump(self.metadata, f, indent=2, ensure_ascii=False, default=str)
         print(f"   📝 元数据已保存: {metadata_file}")
         
         # 生成数据质量报告
@@ -244,7 +244,7 @@ class DataSnapshot:
         
         # 红灯：任何列缺失率 > 20%
         red_flag_missing = missing_ratio.max() > 0.20
-        report['checks']['missing_ratio']['red_flag'] = red_flag_missing
+        report['checks']['missing_ratio']['red_flag'] = bool(red_flag_missing)
         
         print(f"   ✓ 缺失率: 最大 {missing_ratio.max():.2%}, 平均 {missing_ratio.mean():.2%}")
         if red_flag_missing:
@@ -278,7 +278,7 @@ class DataSnapshot:
         
         # 红灯：重复率 > 1%
         red_flag_duplicates = (duplicates / len(data)) > 0.01
-        report['checks']['duplicates']['red_flag'] = red_flag_duplicates
+        report['checks']['duplicates']['red_flag'] = bool(red_flag_duplicates)
         
         print(f"   ✓ 重复数据: {duplicates} ({duplicates/len(data):.2%})")
         if red_flag_duplicates:
@@ -295,7 +295,7 @@ class DataSnapshot:
             
             # 红灯：可交易样本 < 70%
             red_flag_tradable = tradable_ratio < 0.70
-            report['checks']['tradable_samples']['red_flag'] = red_flag_tradable
+            report['checks']['tradable_samples']['red_flag'] = bool(red_flag_tradable)
             
             print(f"   ✓ 可交易样本: {tradable_count} ({tradable_ratio:.2%})")
             if red_flag_tradable:
@@ -348,7 +348,7 @@ class DataSnapshot:
         
         # 红灯：最大间隔 > 10天（可能存在数据缺失）
         red_flag_gap = max_gap > 10 if not pd.isna(max_gap) else False
-        report['checks']['time_continuity']['red_flag'] = red_flag_gap
+        report['checks']['time_continuity']['red_flag'] = bool(red_flag_gap)
         
         print(f"   ✓ 时间连续性: {len(dates)} 个交易日, 最大间隔 {max_gap} 天")
         if red_flag_gap:
@@ -363,7 +363,7 @@ class DataSnapshot:
         ])
         
         report['overall_quality'] = 'PASS' if red_flags == 0 else 'WARNING'
-        report['red_flags_count'] = red_flags
+        report['red_flags_count'] = int(red_flags)
         
         print(f"\n   {'✅' if red_flags == 0 else '⚠️ '} 总体评分: {report['overall_quality']} ({red_flags} 个红灯)")
         
@@ -385,7 +385,7 @@ class DataSnapshot:
         )
         
         with open(report_file, 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+            json.dump(report, f, indent=2, ensure_ascii=False, default=str)
         
         print(f"   📊 质量报告已保存: {report_file}")
     

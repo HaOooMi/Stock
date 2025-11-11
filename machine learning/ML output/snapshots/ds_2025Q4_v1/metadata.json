@@ -1,0 +1,60 @@
+{
+  "snapshot_id": "ds_2025Q4_v1",
+  "created_at": "2025-11-11T11:23:00.833397",
+  "version": "1.0",
+  "data_sources": [],
+  "filters": {
+    "min_volume": 2000,
+    "min_price": 1.0,
+    "exclude_st": true
+  },
+  "quality_checks": {
+    "timestamp": "2025-11-11T11:23:06.100388",
+    "total_samples": 0,
+    "checks": {
+      "missing_ratio": {
+        "max": NaN,
+        "mean": NaN,
+        "columns_with_missing": {},
+        "red_flag": false
+      },
+      "extreme_values": {
+        "max": NaN,
+        "mean": NaN
+      },
+      "duplicates": {
+        "count": 0,
+        "ratio": NaN,
+        "red_flag": false
+      },
+      "suspended": {
+        "count": 0,
+        "ratio": NaN
+      },
+      "limit_moves": {
+        "limit_up": 0,
+        "limit_down": 0,
+        "total": 0,
+        "ratio": NaN
+      },
+      "time_continuity": {
+        "n_dates": 0,
+        "max_gap_days": 0,
+        "date_range": "NaT ~ NaT",
+        "red_flag": false
+      }
+    },
+    "overall_quality": "PASS",
+    "red_flags_count": 0
+  },
+  "statistics": {},
+  "symbol": "000063",
+  "start_date": "2018-01-01",
+  "end_date": "2024-12-31",
+  "random_seed": 42,
+  "n_samples": 0,
+  "n_features": 34,
+  "data_hash": "e8984a0300490e750f284bb479cdb2a2",
+  "data_file": "d:\\vscode projects\\stock\\machine learning\\ML output\\snapshots\\ds_2025Q4_v1\\000063_data.parquet",
+  "data_format": "parquet"
+}

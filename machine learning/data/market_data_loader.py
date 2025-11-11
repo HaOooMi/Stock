@@ -169,6 +169,18 @@ class MarketDataLoader:
                 # 排序
                 df = df.sort_index()
                 
+                # ========== akshare 数据单位说明 ==========
+                # akshare API (stock_zh_a_hist) 返回的数据单位：
+                # - 价格（元）：使用前复权(qfq)，价格保持最近真实水平
+                # - 成交量（手）：1手=100股，保持手为单位，无需转换
+                # - 成交额（元）：已经是元，无需转换
+                # - 换手率/涨跌幅（小数）：0.01 = 1%，无需转换
+                
+                # 注意：成交量保持"手"为单位，不进行转换
+                # 配置文件中的 min_volume 也应使用"手"为单位
+                
+                print(f"   ✅ 数据加载完成 (成交量单位:手)")
+                
                 # 添加元数据字段（从MySQL获取）
                 df = self._enrich_with_metadata(df, symbol)
                 

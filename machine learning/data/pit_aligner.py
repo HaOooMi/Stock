@@ -6,13 +6,13 @@ Point-in-Time (PIT) 数据对齐器
 功能：
 1. 财务数据按公告日+滞后生效（避免未来信息泄漏）
 2. 历史成分股管理（避免幸存者偏差） 
-3. 后复权价格处理
+3. 前复权价格处理
 4. 交易日对齐
 
 核心原则：
 - 财务数据严格按公告日生效，绝不使用"报告期"点位
 - 历史成分股按照当时的实际成分进行回测
-- 价格数据使用后复权，确保时间一致性
+- 价格数据使用前复权，确保时间一致性
 """
 
 import os
@@ -224,9 +224,9 @@ class PITDataAligner:
                         adj_factor_col: str = 'adj_factor',
                         price_cols: List[str] = ['open', 'high', 'low', 'close']) -> pd.DataFrame:
         """
-        应用后复权因子
+        应用前复权因子
         
-        用途：研究宪章核心原则 - 价格数据后复权处理
+        用途：研究宪章核心原则 - 价格数据前复权处理
         - 确保时间一致性
         - 分红、送股等调整
         
@@ -244,7 +244,7 @@ class PITDataAligner:
         pd.DataFrame
             复权后的价格数据
         """
-        print(f"\n💰 应用后复权因子")
+        print(f"\n💰 应用前复权因子")
         
         df = price_df.copy()
         

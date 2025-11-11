@@ -1,0 +1,39 @@
+{
+  "timestamp": "2025-11-11T11:23:06.100388",
+  "total_samples": 0,
+  "checks": {
+    "missing_ratio": {
+      "max": NaN,
+      "mean": NaN,
+      "columns_with_missing": {},
+      "red_flag": false
+    },
+    "extreme_values": {
+      "max": NaN,
+      "mean": NaN
+    },
+    "duplicates": {
+      "count": 0,
+      "ratio": NaN,
+      "red_flag": false
+    },
+    "suspended": {
+      "count": 0,
+      "ratio": NaN
+    },
+    "limit_moves": {
+      "limit_up": 0,
+      "limit_down": 0,
+      "total": 0,
+      "ratio": NaN
+    },
+    "time_continuity": {
+      "n_dates": 0,
+      "max_gap_days": 0,
+      "date_range": "NaT ~ NaT",
+      "red_flag": false
+    }
+  },
+  "overall_quality": "PASS",
+  "red_flags_count": 0
+}

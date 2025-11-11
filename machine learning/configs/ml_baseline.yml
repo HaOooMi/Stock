@@ -43,10 +43,10 @@ data:
   # 股票代码（支持单标的和多标的）
   # 单标的模式：symbol: "000001"
   # 多标的模式：symbol: ["000001", "600000", "000858"]
-  symbol: "000001"
+  # 测试模式：编号1-10的股票
+  symbol: ["000001", "000002", "000063"]
   
-  # 时间窗口
-  start_date: "2022-01-01"
+  start_date: "2018-01-01"
   end_date: "2024-12-31"
   
   # 数据快照（版本化）
@@ -57,20 +57,20 @@ data:
     
   # 数据过滤（交易可行性）
   universe:
-    min_volume: 1000000             # 最小成交量
-    min_amount: 50000000            # 最小成交额（5000万）
-    min_price: 1.0                  # 最小价格
-    min_turnover: 0.002             # 最小换手率（0.2%）
-    min_listing_days: 60            # 最小上市天数
-    exclude_st: true                # 排除ST股票
-    exclude_limit_moves: true       # 排除涨跌停
-    limit_threshold: 0.095          # 涨跌停阈值（9.5%）
+    min_volume: 2000            # 最小成交量（手，1手=100股）
+    min_amount: 10000000        # 最小成交额（元）
+    min_price: 1.0              # 最小价格（元）
+    min_turnover: 0.1           # 最小换手率（注意：akshare返回的是百分比数值，0.1表示0.1%）
+    min_listing_days: 60        # 最小上市天数
+    exclude_st: true
+    exclude_limit_moves: false  # 训练先不过滤涨跌停，更有利于覆盖全分布
+    limit_threshold: 0.098      # 主板非ST阈值（9.8%，更接近实际10%涨跌停）
     
   # Point-in-Time (PIT) 对齐
   pit:
     enabled: true                   # 是否启用PIT对齐
     financial_lag_days: 90          # 财务数据滞后天数
-    use_adj_factor: true            # 使用后复权因子
+    use_adj_factor: true            # 使用前复权因子
     validate_alignment: true        # 验证PIT对齐
   
   # InfluxDB 配置（从InfluxDB加载原始市场数据）

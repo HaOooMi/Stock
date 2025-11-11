@@ -65,13 +65,14 @@ class TradabilityFilter:
         Parameters:
         -----------
         min_volume : float
-            最小成交量
+            最小成交量（手，1手=100股）
+            注意：InfluxDB中存储的成交量单位为"手"
         min_amount : float
             最小成交额（元）
         min_price : float
-            最小价格
+            最小价格（元）
         min_turnover : float
-            最小换手率
+            最小换手率（注意：akshare返回的是百分比数值，0.2表示0.2%，不是0.002）
         min_listing_days : int
             最小上市天数
         exclude_st : bool
@@ -285,9 +286,11 @@ class TradabilityFilter:
         过滤3: 涨跌停
         
         检测方式：
-        - 涨跌幅 > ±9.5% (普通股)
-        - 涨跌幅 > ±4.5% (ST股)
-        - 或收盘价接近涨跌停价
+        - 动态阈值：根据股票板块和ST状态选择合适阈值
+          * 主板非ST: 9.8% (0.098)
+          * ST股票: 4.8% (0.048)
+          * 创业板/科创板: 19.8% (0.198)
+        - 使用涨跌幅绝对值判断，移除"接近涨跌停"的模糊判断
         """
         before_count = len(data[data['tradable_flag'] == 1])
         
@@ -309,14 +312,35 @@ class TradabilityFilter:
         elif 'name' in data.columns:
             is_st = data['name'].str.contains('ST', na=False)
         
-        # 涨跌停阈值
-        limit_threshold = pd.Series(self.limit_threshold, index=data.index)
-        limit_threshold[is_st] = 0.045  # ST股4.5%
+        # 判断是否为创业板/科创板（股票代码前缀：300xxx创业板，688xxx科创板）
+        is_cy_kc = pd.Series(False, index=data.index)
+        if isinstance(data.index, pd.MultiIndex):
+            tickers = data.index.get_level_values('ticker')
+        else:
+            # 如果有ticker列
+            if 'ticker' in data.columns:
+                tickers = data['ticker']
+            else:
+                tickers = pd.Series(['000000'] * len(data), index=data.index)
         
-        # 检测涨跌停
+        # 创业板(300)和科创板(688)判断
+        is_cy_kc = tickers.astype(str).str.startswith(('300', '688'))
+        
+        # 动态设置涨跌停阈值
+        limit_threshold = pd.Series(self.limit_threshold, index=data.index)
+        
+        # ST股票：4.8% (接近实际5%涨跌停)
+        limit_threshold[is_st] = 0.048
+        
+        # 创业板/科创板：19.8% (接近实际20%涨跌停)
+        limit_threshold[is_cy_kc & ~is_st] = 0.198
+        
+        # 主板非ST：使用配置的阈值(推荐0.098，接近实际10%涨跌停)
+        # 已在初始化时设置
+        
+        # 检测涨跌停（移除"接近涨跌停"的模糊判断）
         mask = data['tradable_flag'] == 1
-        mask = mask & ((pct_change.abs() > limit_threshold) | 
-                      (pct_change.abs() > limit_threshold - 0.005))  # 接近涨跌停
+        mask = mask & (pct_change.abs() > limit_threshold)
         
         # 标记为不可交易
         data.loc[mask, 'tradable_flag'] = 0
@@ -345,7 +369,11 @@ class TradabilityFilter:
         else:
             current_date = pd.to_datetime(data.index)
         
-        list_date = pd.to_datetime(data['list_date'])
+        # 确保日期都是 tz-naive（移除时区信息）
+        list_date = pd.to_datetime(data['list_date']).dt.tz_localize(None)
+        if hasattr(current_date, 'tz') and current_date.tz is not None:
+            current_date = current_date.tz_localize(None)
+        
         listing_days = (current_date - list_date).dt.days
         
         # 过滤上市天数不足的
@@ -396,11 +424,15 @@ class TradabilityFilter:
     def _filter_turnover(self, data: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
         """
         过滤7: 换手率
+        
+        注意：akshare返回的换手率是百分比数值（如0.5表示0.5%）
         """
         before_count = len(data[data['tradable_flag'] == 1])
         
-        # 计算换手率
-        if 'turnover_rate' in data.columns:
+        # 计算换手率（优先使用从InfluxDB加载的turnover列）
+        if 'turnover' in data.columns:
+            turnover = data['turnover']
+        elif 'turnover_rate' in data.columns:
             turnover = data['turnover_rate']
         elif 'volume' in data.columns and 'shares_outstanding' in data.columns:
             turnover = data['volume'] / data['shares_outstanding']

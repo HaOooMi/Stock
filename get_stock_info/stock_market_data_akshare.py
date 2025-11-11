@@ -51,7 +51,7 @@ def fetch_history_market_data(client,measurement_name):
         
         while retry_count < max_retries and not success:
             try:
-                kline_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="hfq")
+                kline_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
                 
                 if kline_df.empty:
                     print(f"  -> 未找到 {stock_name} ({stock_code}) 的历史行情数据,跳过。")

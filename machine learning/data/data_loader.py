@@ -30,6 +30,7 @@ if project_root not in sys.path:
 
 # 导入新模块
 try:
+    from data.financial_data_loader import FinancialDataLoader
     from data.data_snapshot import DataSnapshot
     from data.tradability_filter import TradabilityFilter
     from data.pit_aligner import PITDataAligner
@@ -114,7 +115,13 @@ class DataLoader:
         
         # 初始化子模块
         if enable_snapshot and DataSnapshot is not None:
-            self.snapshot_mgr = DataSnapshot(output_dir=self.data_root)
+            # DataSnapshot 应该使用 ML output 根目录,而不是 datasets_dir
+            # 避免在 datasets/baseline_v1 下创建 snapshots/ 和 reports/ 子目录
+            if 'ML output' in self.data_root:
+                snapshot_root = self.data_root.split('ML output')[0] + 'ML output'
+            else:
+                snapshot_root = self.data_root
+            self.snapshot_mgr = DataSnapshot(output_dir=snapshot_root)
         else:
             self.snapshot_mgr = None
         
@@ -238,16 +245,41 @@ class DataLoader:
         features_multi = pd.DataFrame(features_aligned.values, index=multi_index, columns=feature_cols)
         targets_multi = pd.Series(targets_aligned.values, index=multi_index, name=target_col)
         
-        # 7. 清洗数据（删除NaN）
-        valid_mask = ~(features_multi.isna().any(axis=1) | targets_multi.isna())
+        # 7. 清洗数据（仅删除特征行的NaN，保留目标尾部NaN以通过PIT验证）
+        # 检查目标尾部NaN（用于诊断）
+        tail_target_nans = targets_multi.tail(10).isna().sum()
+        
+        # 统计特征缺失情况
+        feature_nan_counts = features_multi.isna().sum()
+        high_nan_cols = feature_nan_counts[feature_nan_counts > 0].sort_values(ascending=False)
+        
+        print(f"\n   🔍 数据质量诊断:")
+        print(f"      目标尾部10行NaN: {tail_target_nans}/10 (PIT要求保留)")
+        if len(high_nan_cols) > 0:
+            print(f"      存在缺失的特征列: {len(high_nan_cols)} 个")
+            if len(high_nan_cols) <= 5:
+                print(f"      缺失列详情: {dict(high_nan_cols)}")
+            else:
+                print(f"      缺失TOP5: {dict(high_nan_cols.head(5))}")
+        
+        # 修改过滤逻辑：仅删除特征行有NaN的样本，保留目标NaN（特别是尾部）
+        valid_mask = ~features_multi.isna().any(axis=1)
         features_clean = features_multi[valid_mask]
         targets_clean = targets_multi[valid_mask]
         
-        print(f"   ✅ 数据加载完成:")
+        # 再次检查目标尾部NaN（确认保留）
+        tail_target_nans_after = targets_clean.tail(10).isna().sum()
+        
+        print(f"\n   ✅ 数据加载完成:")
         print(f"      特征数量: {len(feature_cols)}")
-        print(f"      有效样本: {len(features_clean)} / {len(features_aligned)}")
-        print(f"      时间范围: {features_clean.index.get_level_values('date').min().date()} ~ "
-              f"{features_clean.index.get_level_values('date').max().date()}")
+        print(f"      初始样本: {len(features_aligned)}")
+        print(f"      有效样本: {len(features_clean)} (过滤掉 {len(features_aligned) - len(features_clean)} 个特征缺失样本)")
+        print(f"      目标尾部NaN保留: {tail_target_nans_after}/10 ({'✅' if tail_target_nans_after > 0 else '⚠️'})")
+        if len(features_clean) > 0:
+            print(f"      时间范围: {features_clean.index.get_level_values('date').min().date()} ~ "
+                  f"{features_clean.index.get_level_values('date').max().date()}")
+        else:
+            print(f"      ⚠️  警告: 过滤后样本数为0，请检查特征缺失率或放宽过滤条件")
         
         return features_clean, targets_clean
     
@@ -347,10 +379,7 @@ class DataLoader:
         Tuple[pd.DataFrame, pd.Series]
             合并后的特征和目标
         """
-        try:
-            # 导入财务数据加载器
-            from data.financial_data_loader import FinancialDataLoader
-            
+        try:            
             # 初始化财务数据加载器
             financial_loader = FinancialDataLoader(announce_lag_days=90)
             
@@ -376,6 +405,7 @@ class DataLoader:
             )
             
             # 合并到特征数据
+            fin_cols_added = []
             for col in aligned_financial.columns:
                 if col not in ['symbol', 'report_date', 'announce_date', 'effective_date']:
                     # 添加前缀避免列名冲突
@@ -385,8 +415,27 @@ class DataLoader:
                         feature_dates = features.index.get_level_values('date')
                         aligned_values = aligned_financial[col].reindex(feature_dates)
                         features[new_col] = aligned_values.values
+                        fin_cols_added.append(new_col)
             
-            print(f"   ✓ 财务特征合并完成: 添加 {len([c for c in features.columns if c.startswith('fin_')])} 个财务特征")
+            # 对财务列进行限制式前向填充（避免过度填充导致未来泄漏）
+            if fin_cols_added:
+                # 计算财务列初始缺失率
+                initial_fin_nans = features[fin_cols_added].isna().sum().sum()
+                
+                # 按ticker分组进行限制式前向填充（最多5天）
+                features[fin_cols_added] = features.groupby(level='ticker')[fin_cols_added].fillna(method='ffill', limit=5)
+                
+                # 计算填充后缺失率
+                final_fin_nans = features[fin_cols_added].isna().sum().sum()
+                filled_count = initial_fin_nans - final_fin_nans
+                
+                print(f"   ✓ 财务特征合并完成: 添加 {len(fin_cols_added)} 个财务特征")
+                if initial_fin_nans > 0:
+                    print(f"      前向填充: {filled_count} 个缺失值 (限制5天)")
+                    if final_fin_nans > 0:
+                        print(f"      剩余缺失: {final_fin_nans} 个 (将被过滤)")
+            else:
+                print(f"   ✓ 财务特征合并完成: 未添加新列（可能已存在或无可用数据）")
             
         except Exception as e:
             print(f"   ⚠️  财务数据加载失败: {e}")
@@ -561,6 +610,7 @@ class DataLoader:
             )
         
         # 4. 应用交易可行性过滤
+        initial_sample_count = len(features)
         if self.enable_filtering and self.filter_engine is not None:
             # 合并特征和目标以便过滤
             combined_data = features.copy()
@@ -568,13 +618,11 @@ class DataLoader:
             
             # 应用过滤
             filter_log_path = os.path.join(
-                self.data_root, 
-                'datasets', 
-                'baseline_v1', 
+                self.data_root,
                 f'filter_log_{symbol}.csv'
             )
             
-            filtered_data, _ = self.filter_engine.apply_filters(
+            filtered_data, filter_log_df = self.filter_engine.apply_filters(
                 combined_data,
                 save_log=True,
                 log_path=filter_log_path
@@ -585,9 +633,29 @@ class DataLoader:
             features = filtered_data[tradable_mask][features.columns]
             targets = filtered_data[tradable_mask][target_col]
             
-            print(f"\n   ✅ 交易过滤完成: {len(features)} 个可交易样本")
+            removed_by_filter = initial_sample_count - len(features)
+            print(f"\n   ✅ 交易过滤完成:")
+            print(f"      过滤前: {initial_sample_count} 个样本")
+            print(f"      过滤后: {len(features)} 个可交易样本")
+            print(f"      剔除: {removed_by_filter} 个样本 ({removed_by_filter/initial_sample_count:.1%})")
+            
+            if len(features) == 0:
+                print(f"\n      ⚠️  警告: 所有样本均被过滤，建议:")
+                print(f"         1. 降低 min_volume (当前: {self.filter_engine.min_volume:,.0f})")
+                print(f"         2. 降低 min_turnover (当前: {self.filter_engine.min_turnover:.2%})")
+                print(f"         3. 降低 min_listing_days (当前: {self.filter_engine.min_listing_days})")
+                print(f"         4. 检查过滤日志: {filter_log_path}")
         
-        # 4. PIT对齐验证（在过滤之后）
+        # 4.5 PIT对齐前的统计（用于诊断）
+        print(f"\n   📊 PIT验证前数据状态:")
+        print(f"      样本数: {len(features)}")
+        if len(features) > 0:
+            tail_nans = targets.tail(10).isna().sum()
+            print(f"      目标尾部10行NaN: {tail_nans}/10")
+            feature_nan_ratio = features.isna().sum().sum() / (len(features) * len(features.columns))
+            print(f"      特征总体缺失率: {feature_nan_ratio:.2%}")
+        
+        # 5. PIT对齐验证（在过滤之后）
         if self.enable_pit_alignment and self.pit_aligner is not None:
             combined_data = features.copy()
             combined_data[target_col] = targets
@@ -598,7 +666,11 @@ class DataLoader:
             )
             
             if not pit_results.get('overall_pass', False):
-                print(f"   ⚠️  警告: PIT对齐验证未通过")
+                print(f"\n   ⚠️  PIT对齐验证未通过，详细结果:")
+                for check_name, result in pit_results.items():
+                    if check_name != 'overall_pass':
+                        status = '✅' if result else '❌'
+                        print(f"      {status} {check_name}: {result}")
         
         # 5. 创建数据快照
         snapshot_id = None
