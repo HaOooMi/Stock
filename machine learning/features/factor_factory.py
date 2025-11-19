@@ -640,8 +640,128 @@ class FactorFactory:
         
         return result
     
+    # ========== 5. v1 核心精选因子 (A股特化) ==========
+    
+    def calc_v1_core_factors(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Feature Factory v1: 推荐的5个核心因子 (A股特化)
+        
+        包含:
+        - REV_20: 20日反转 (A股强反转特性)
+        - RVOL_20: 20日波动率(取负) (低波异象)
+        - MAX_RET_20: 20日最大单日收益(取负) (博彩效应)
+        - TURNOVER_20: 20日平均换手(取负) (情绪过热)
+        - MOM_FROG_20: 路径平滑动量 (高质量动量)
+        
+        Returns:
+        --------
+        pd.DataFrame
+            包含 v1 核心因子
+        """
+        result = pd.DataFrame(index=data.index)
+        
+        # 基础数据
+        ret_1d = data['close'].pct_change()
+        
+        # 1. REV_20: 20日反转
+        # 逻辑: A股散户多，短期涨幅过大容易回调
+        ret_20 = data['close'].pct_change(20)
+        result['rev_20d'] = -ret_20
+        self.factor_registry['rev_20d'] = {
+            'family': 'v1_核心',
+            'formula': '-ROC_20',
+            'period': 20,
+            'reference': 'Lehmann (1990); Jegadeesh (1990)'
+        }
+        
+        # 2. RVOL_20: 20日波动率 (取负)
+        # 逻辑: 低波异象，高波动往往对应低未来收益
+        realized_vol_20 = ret_1d.rolling(20).std()
+        result['rvol_20d'] = -realized_vol_20
+        self.factor_registry['rvol_20d'] = {
+            'family': 'v1_核心',
+            'formula': '-std(returns_1d, 20)',
+            'period': 20,
+            'reference': 'Ang et al. (2006)'
+        }
+        
+        # 3. MAX_RET_20: 20日最大单日收益 (取负)
+        # 逻辑: 博彩偏好，剔除近期有过激进行为(如涨停)的股票
+        max_ret_20 = ret_1d.rolling(20).max()
+        result['max_ret_20d'] = -max_ret_20
+        self.factor_registry['max_ret_20d'] = {
+            'family': 'v1_核心',
+            'formula': '-max(returns_1d, 20)',
+            'period': 20,
+            'reference': 'Bali et al. (2011)'
+        }
+        
+        # 4. TURNOVER_20: 20日平均换手率 (取负)
+        # 逻辑: 情绪过热通常是顶部信号
+        if 'turnover' in data.columns:
+            turnover_val = data['turnover']
+        elif 'volume' in data.columns and 'shares_outstanding' in data.columns:
+            turnover_val = data['volume'] / data['shares_outstanding']
+        else:
+            turnover_val = None
+            
+        if turnover_val is not None:
+            turnover_20 = turnover_val.rolling(20).mean()
+            result['turnover_20d'] = -turnover_20
+            self.factor_registry['turnover_20d'] = {
+                'family': 'v1_核心',
+                'formula': '-mean(turnover, 20)',
+                'period': 20,
+                'reference': 'Amihud (2002) 及A股经验'
+            }
+            
+        # 5. MOM_FROG_20: 路径平滑动量
+        # 逻辑: 区分稳步上涨(信息连续)和跳跃上涨(噪音/情绪)
+        # Frog in the Pan: 持续的小涨幅比单次大涨幅更有持续性
+        total_ret_20 = (data['close'] / data['close'].shift(20)) - 1
+        sum_abs_ret_20 = ret_1d.abs().rolling(20).sum()
+        # 避免除零
+        mom_frog_20 = total_ret_20 / (sum_abs_ret_20 + 1e-8)
+        result['mom_frog_20d'] = mom_frog_20
+        self.factor_registry['mom_frog_20d'] = {
+            'family': 'v1_核心',
+            'formula': 'Total_Return_20 / Sum(abs(returns_1d_20))',
+            'period': 20,
+            'reference': 'Da, Gurun, Warachka (2014)'
+        }
+        
+        return result
+    
     # ========== 通用方法 ==========
     
+    def _clean_redundancy(self, factors: pd.DataFrame) -> pd.DataFrame:
+        """
+        内部方法: 清洗冗余因子
+        当存在 v1 核心因子时，剔除对应的基础因子，避免完全共线性
+        """
+        # 1. 处理 Inf
+        factors = factors.replace([np.inf, -np.inf], np.nan)
+        
+        # 2. 剔除已知冗余 (优先保留 v1_核心)
+        # 映射关系: { v1因子: 对应的基础因子 }
+        redundancy_map = {
+            'rev_20d': 'roc_20d',
+            'rvol_20d': 'realized_vol_20d',
+            'turnover_20d': 'turnover_mean_20d',
+            # max_ret_20d 没有直接对应的基础因子
+        }
+        
+        drop_cols = []
+        for v1_col, base_col in redundancy_map.items():
+            if v1_col in factors.columns and base_col in factors.columns:
+                drop_cols.append(base_col)
+        
+        if drop_cols:
+            print(f"   🧹 清洗冗余: 移除 {len(drop_cols)} 个基础因子 (已被v1核心因子替代)")
+            factors = factors.drop(columns=drop_cols)
+            
+        return factors
+
     def generate_all_factors(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         生成所有因子
@@ -684,6 +804,13 @@ class FactorFactory:
         print("   🎯 风格/质量因子族...")
         all_factors = pd.concat([all_factors, self.calc_amihud_illiquidity(data)], axis=1)
         all_factors = pd.concat([all_factors, self.calc_price_range_factors(data)], axis=1)
+        
+        # 5. v1 核心精选因子 (A股特化)
+        print("   🚀 v1 核心精选因子 (A股特化)...")
+        all_factors = pd.concat([all_factors, self.calc_v1_core_factors(data)], axis=1)
+        
+        # 清洗冗余
+        all_factors = self._clean_redundancy(all_factors)
         
         print(f"   ✅ 生成完成: {len(all_factors.columns)} 个因子")
         
