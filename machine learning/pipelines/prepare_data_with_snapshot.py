@@ -158,14 +158,17 @@ def main():
             # 步骤3.1.1: 应用交易可行性过滤（在标准化之前）
             print(f"\n[步骤3.1.1] 应用交易可行性过滤器（基于原始值）")
             if loader.filter_engine:
+                # 构造 filter_log 路径
+                datasets_dir = config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1')
+                if not os.path.isabs(datasets_dir):
+                    datasets_dir = os.path.join(ml_root, datasets_dir)
+                
+                filter_log_path = os.path.join(datasets_dir, f"filter_log_{symbol}.csv")
+                
                 filtered_features, filter_log = loader.filter_engine.apply_filters(
                     features_df,
                     save_log=True,
-                    log_path=os.path.join(
-                        config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'),
-                        f"filter_log_{symbol}.csv"
-                    ) if not os.path.isabs(config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1')) 
-                      else os.path.join(ml_root, config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'), f"filter_log_{symbol}.csv")
+                    log_path=filter_log_path
                 )
                 
                 # 只保留可交易的样本

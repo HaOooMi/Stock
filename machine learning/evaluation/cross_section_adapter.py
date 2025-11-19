@@ -27,12 +27,24 @@ warnings.filterwarnings('ignore')
 # 添加项目路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 ml_root = os.path.dirname(current_dir)
+project_root = os.path.dirname(ml_root)
 if ml_root not in sys.path:
     sys.path.insert(0, ml_root)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 导入现有模块
 from data.data_loader import DataLoader
 from data.market_data_loader import MarketDataLoader
+
+# 导入股票元数据模块
+try:
+    from get_stock_info.stock_meta_akshare import get_basic_info_mysql
+    from sqlalchemy import create_engine
+    HAVE_STOCK_META = True
+except ImportError:
+    HAVE_STOCK_META = False
+    print("⚠️ 股票元数据模块未找到")
 
 # 导入评估核心模块
 try:
@@ -58,7 +70,8 @@ class CrossSectionAdapter:
     def __init__(self, 
                  data_loader: DataLoader,
                  market_data_loader: Optional[MarketDataLoader] = None,
-                 enable_neutralization: bool = False):
+                 enable_neutralization: bool = False,
+                 db_engine = None):
         """
         初始化适配器
         
@@ -70,10 +83,13 @@ class CrossSectionAdapter:
             市场数据加载器（用于获取prices）
         enable_neutralization : bool
             是否启用市值/行业中性化（仅多股票模式）
+        db_engine : sqlalchemy.Engine, optional
+            MySQL数据库引擎（用于获取市值和行业数据）
         """
         self.data_loader = data_loader
         self.market_data_loader = market_data_loader
         self.enable_neutralization = enable_neutralization
+        self.db_engine = db_engine
         
         if not HAVE_CROSS_SECTION:
             raise ImportError("请先实现 cross_section_analyzer.py 和 tearsheet.py")
@@ -81,6 +97,7 @@ class CrossSectionAdapter:
         print(f"🔌 横截面评估适配器初始化")
         print(f"   数据加载器: ✅")
         print(f"   市场数据: {'✅' if market_data_loader else '❌'}")
+        print(f"   数据库连接: {'✅' if db_engine else '❌'}")
         print(f"   中性化: {'✅' if enable_neutralization else '❌'}")
     
     def evaluate_feature(self,
@@ -155,9 +172,10 @@ class CrossSectionAdapter:
         industry_df = None
         
         if not is_single_stock and self.enable_neutralization:
-            print(f"\n   ⚠️  多股票模式下，中性化功能需要market_cap和industry数据")
-            print(f"      当前暂未实现，将跳过中性化")
-            # TODO: 从 features 或 market_data_loader 中提取 market_cap 和 industry
+            print(f"\n   📊 加载市值和行业数据用于中性化...")
+            market_cap_df, industry_df = self._load_market_cap_and_industry(
+                index=factor_df.index
+            )
         
         # 5. 创建 CrossSectionAnalyzer
         analyzer = CrossSectionAnalyzer(
@@ -175,7 +193,7 @@ class CrossSectionAdapter:
         analyzer.preprocess(
             winsorize=True,
             standardize=True,
-            neutralize=False  # 单股票不需要中性化
+            neutralize=(not is_single_stock and self.enable_neutralization)  # 多股票且启用中性化
         )
         
         # 7. 执行分析
@@ -465,6 +483,87 @@ class CrossSectionAdapter:
         prices_df = pd.DataFrame({'close': np.nan}, index=index)
         
         return prices_df
+    
+    def _load_market_cap_and_industry(self,
+                                      index: pd.MultiIndex) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """
+        从MySQL数据库加载市值和行业数据
+        
+        Parameters:
+        -----------
+        index : pd.MultiIndex
+            目标索引（date, ticker）
+            
+        Returns:
+        --------
+        Tuple[pd.DataFrame, pd.DataFrame]
+            (市值数据, 行业数据)，均为MultiIndex[date, ticker]
+        """
+        if not HAVE_STOCK_META or self.db_engine is None:
+            print(f"      ⚠️  无法加载市值和行业数据：缺少数据库连接或股票元数据模块")
+            return None, None
+        
+        try:
+            # 提取所有唯一股票代码
+            tickers = index.get_level_values('ticker').unique().tolist()
+            
+            # 从MySQL获取股票基本信息
+            with self.db_engine.connect() as conn:
+                stock_info = get_basic_info_mysql(conn, tuple(tickers))
+            
+            if not stock_info:
+                print(f"      ⚠️  未找到股票基本信息")
+                return None, None
+            
+            # 构建市值DataFrame（使用流通市值）
+            market_cap_data = []
+            industry_data = []
+            
+            for (date, ticker) in index:
+                if ticker in stock_info:
+                    info = stock_info[ticker]
+                    # 市值（使用流通市值，单位：元）
+                    market_cap = info.get('流通市值')
+                    if pd.notna(market_cap):
+                        market_cap_data.append({
+                            'date': date,
+                            'ticker': ticker,
+                            'market_cap': float(market_cap)
+                        })
+                    
+                    # 行业
+                    industry = info.get('所属行业')
+                    if pd.notna(industry):
+                        industry_data.append({
+                            'date': date,
+                            'ticker': ticker,
+                            'industry': str(industry)
+                        })
+            
+            # 转换为DataFrame
+            if market_cap_data:
+                market_cap_df = pd.DataFrame(market_cap_data)
+                market_cap_df = market_cap_df.set_index(['date', 'ticker'])
+                print(f"      ✅ 加载市值数据: {len(market_cap_df)} 行")
+            else:
+                market_cap_df = None
+                print(f"      ⚠️  未找到市值数据")
+            
+            if industry_data:
+                industry_df = pd.DataFrame(industry_data)
+                industry_df = industry_df.set_index(['date', 'ticker'])
+                print(f"      ✅ 加载行业数据: {len(industry_df)} 行")
+            else:
+                industry_df = None
+                print(f"      ⚠️  未找到行业数据")
+            
+            return market_cap_df, industry_df
+            
+        except Exception as e:
+            print(f"      ⚠️  加载市值和行业数据失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None
 
 
 def quick_evaluate(symbol: str,
@@ -472,7 +571,9 @@ def quick_evaluate(symbol: str,
                   data_root: str = "ML output/datasets/baseline_v1",
                   target_col: str = 'future_return_5d',
                   use_scaled: bool = True,
-                  output_dir: Optional[str] = None) -> Dict:
+                  output_dir: Optional[str] = None,
+                  enable_neutralization: bool = False,
+                  db_config: Optional[Dict] = None) -> Dict:
     """
     快速评估接口（一键调用）
     
@@ -490,6 +591,10 @@ def quick_evaluate(symbol: str,
         是否使用标准化特征
     output_dir : str, optional
         输出目录
+    enable_neutralization : bool
+        是否启用市值/行业中性化（仅多股票模式）
+    db_config : dict, optional
+        数据库配置，格式: {'host': 'localhost', 'user': 'root', 'password': 'xxx', 'database': 'stock_data'}
         
     Returns:
     --------
@@ -517,11 +622,22 @@ def quick_evaluate(symbol: str,
     start_date = dates.min().strftime('%Y-%m-%d')
     end_date = dates.max().strftime('%Y-%m-%d')
     
+    # 创建数据库引擎（如果提供了配置）
+    db_engine = None
+    if enable_neutralization and db_config and HAVE_STOCK_META:
+        try:
+            db_url = f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}/{db_config['database']}"
+            db_engine = create_engine(db_url)
+            print(f"✅ 数据库连接成功")
+        except Exception as e:
+            print(f"⚠️ 数据库连接失败: {e}")
+    
     # 初始化适配器
     adapter = CrossSectionAdapter(
         data_loader=data_loader,
         market_data_loader=None,
-        enable_neutralization=False
+        enable_neutralization=enable_neutralization,
+        db_engine=db_engine
     )
     
     # 执行评估

@@ -94,6 +94,55 @@ features:
     winsorize_quantile: [0.01, 0.99]  # 去极值分位数
     fillna_method: "forward"           # 缺失值填充方法
     
+  # 因子工厂配置（因子库与稳健筛选）
+  factor_factory:
+    enabled: true             # 是否启用因子工厂
+    
+    # 因子生成参数
+    generation:
+      # 动量/反转族
+      momentum:
+        roc_periods: [5, 10, 20, 60, 120]         # ROC周期
+        sma_periods: [20, 60, 120]                 # 移动平均周期
+        longshort_windows: [[20, 60], [60, 120]]   # 长短动量窗口对
+        
+      # 波动率族
+      volatility:
+        windows: [20, 60]                          # 波动率窗口
+        use_parkinson: true                        # 使用Parkinson估计器
+        use_gk: true                               # 使用Garman-Klass估计器
+        
+      # 量价微观结构族
+      volume_price:
+        turnover_windows: [5, 20]                  # 换手率窗口
+        vp_corr_windows: [20, 60]                  # 量价相关性窗口
+        
+      # 风格/质量族
+      style:
+        illiquidity_windows: [20]                  # 非流动性窗口
+        price_range_windows: [20, 60]              # 价格范围窗口
+    
+    # 因子质量检查标准
+    quality_check:
+      ic_threshold: 0.02                           # IC均值阈值
+      icir_threshold: 0.5                          # ICIR年化阈值
+      psi_threshold: 0.25                          # PSI阈值（分布稳定性）
+      corr_threshold: 0.7                          # 相关性阈值（避免冗余）
+      check_ic_decay: true                         # 检查IC衰减
+      check_monotonicity: true                     # 检查单调性
+      
+    # 因子库管理
+    library:
+      min_qualified_factors: 10                    # 最小合格因子数
+      max_factors_per_family: 5                    # 每族最大因子数（防止维度爆炸）
+      version_control: true                        # 启用版本控制
+      
+    # 验收标准
+    acceptance:
+      min_factors: 10                              # 至少10个稳定因子
+      min_significant_ratio: 0.8                   # 至少80%因子显著
+      min_combined_ic: 0.03                        # 组合IC最低要求
+    
 # ===================== 目标配置 =====================
 target:
   # 目标变量名称
