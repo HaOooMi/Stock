@@ -22,11 +22,12 @@
   factors = factory.generate_all_factors()    # 高级因子
   combined = pd.concat([features, factors], axis=1)  # 组合
 
-4大因子族：
+5大因子族：
 1. 动量/反转 (12个) - Jegadeesh & Titman (1993)
 2. 波动率 (8个) - French et al. (1987)
 3. 量价微结构 (9个) - Lee & Swaminathan (2000)
 4. 风格/质量 (3个) - Fama & French (1993)
+5. v1核心精选 (5个) - A股特化 (反转/低波/反博彩)
 
 设计原则：
 ✓ 高信息量：每个因子有学术验证

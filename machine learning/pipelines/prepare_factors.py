@@ -77,8 +77,6 @@ from evaluation.cross_section_analyzer import CrossSectionAnalyzer
 from evaluation.cross_section_metrics import calculate_forward_returns
 from evaluation.factor_preprocessing import preprocess_factor_pipeline
 from evaluation.tearsheet import generate_html_tearsheet
-# 使用factor_quality_checker进行补充检查（IC半衰期、PSI/KS）
-from evaluation.factor_quality_checker import FactorQualityChecker
 
 
 def load_config(config_path: str = "configs/ml_baseline.yml") -> dict:
@@ -307,29 +305,39 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             pass_spread = spread_summary['mean'] > SPREAD_THRESHOLD
             pass_mono = monotonicity['kendall_tau'] > 0 and monotonicity['p_value'] < 0.05
             
-            # 使用factor_quality_checker进行补充检查（IC半衰期、PSI/KS、相关性）
-            quality_checker = FactorQualityChecker(
-                ic_threshold=IC_THRESHOLD,
-                icir_threshold=ICIR_THRESHOLD,
-                psi_threshold=0.25,
-                corr_threshold=CORR_THRESHOLD
-            )
-            
-            # 提取5日远期收益
-            forward_return_5d = forward_returns_df['ret_5d']
-            
-            # 补充质量检查
-            extra_checks = quality_checker.comprehensive_check(
-                factor_values=single_factor_df[factor_name],
-                target_values=forward_return_5d,
+            # 使用 CrossSectionAnalyzer 的深度质量检查功能（PSI/KS/IC衰减）
+            # 重新运行分析器，这次开启 check_quality
+            analyzer_quality = CrossSectionAnalyzer(
+                factors=single_factor_df[[factor_name]],
+                forward_returns=forward_returns_df,
                 prices=prices_df if 'close' in features_df.columns else None,
-                existing_factors=all_factors_df[qualified_factors] if qualified_factors else None,
-                train_ratio=0.8
+                tradable_mask=tradable_mask
             )
+            analyzer_quality.preprocess(
+                winsorize=True,
+                standardize=True,
+                neutralize=False
+            )
+            analyzer_quality.analyze(
+                n_quantiles=5,
+                ic_method='spearman',
+                check_quality=True  # 开启深度检查
+            )
+            quality_results = analyzer_quality.get_results()
             
-            # 综合判断（横截面指标 + 补充检查）
-            pass_corr = extra_checks['corr_check']['pass_corr']
-            pass_psi = extra_checks['pass_psi']
+            # 提取质量报告
+            quality_report = quality_results.get('quality_reports', {}).get(factor_name, {})
+            pass_psi = quality_report.get('psi', 1.0) < 0.25
+            pass_ks = quality_report.get('ks_p', 0) > 0.05
+            
+            # 相关性检查（与已有因子）
+            pass_corr = True
+            max_corr = 0.0
+            if qualified_factors:
+                existing_factors = all_factors_df[qualified_factors]
+                corrs = existing_factors.corrwith(single_factor_df[factor_name]).abs()
+                max_corr = corrs.max()
+                pass_corr = max_corr < CORR_THRESHOLD
             
             # 核心指标必须通过，补充指标可降权
             overall_pass = pass_ic and pass_icir and pass_spread and pass_corr
@@ -341,17 +349,19 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
                 'ic_pvalue': ic_summary['p_value'],
                 'spread': spread_summary['mean'],
                 'monotonicity_tau': monotonicity['kendall_tau'],
-                'max_correlation': extra_checks['corr_check']['max_corr'],
-                'ic_half_life': extra_checks.get('ic_half_life', np.nan),
-                'psi': extra_checks.get('psi', np.nan),
+                'max_correlation': max_corr,
+                'ic_half_life': quality_report.get('ic_half_life', np.nan),
+                'psi': quality_report.get('psi', np.nan),
+                'ks_stat': quality_report.get('ks_stat', np.nan),
+                'ks_p': quality_report.get('ks_p', np.nan),
                 'pass_ic': pass_ic,
                 'pass_icir': pass_icir,
                 'pass_spread': pass_spread,
                 'pass_correlation': pass_corr,
                 'pass_psi': pass_psi,
+                'pass_ks': pass_ks,
                 'overall_pass': overall_pass,
-                'full_results': results,  # 横截面完整结果
-                'extra_checks': extra_checks  # 补充检查结果
+                'full_results': results  # 横截面完整结果
             }
             
             if overall_pass:

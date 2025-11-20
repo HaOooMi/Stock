@@ -23,6 +23,9 @@ from .cross_section_metrics import (
     calculate_factor_autocorrelation
 )
 
+from scipy import stats
+from scipy.stats import ks_2samp
+
 from .factor_preprocessing import (
     preprocess_factor_pipeline
 )
@@ -195,7 +198,8 @@ class CrossSectionAnalyzer:
                n_quantiles: int = 5,
                ic_method: str = 'spearman',
                spread_method: str = 'top_minus_mean',
-               periods_per_year: int = 252):
+               periods_per_year: int = 252,
+               check_quality: bool = False):
         """
         执行完整的横截面分析
         
@@ -209,6 +213,8 @@ class CrossSectionAnalyzer:
             Spread计算方法
         periods_per_year : int
             年化参数
+        check_quality : bool
+            是否执行深度质量检查（PSI/KS/IC衰减等）
         """
         print("\n" + "=" * 70)
         print("横截面分析")
@@ -339,11 +345,113 @@ class CrossSectionAnalyzer:
         
         self.results['turnover_stats'] = turnover_stats
         
+        # 8. 深度质量检查 (PSI/KS/IC衰减)
+        if check_quality:
+            print("\n8️⃣  执行深度质量检查 (PSI/KS/IC衰减)...")
+            quality_reports = {}
+            
+            for factor_col in factors.columns:
+                # 准备数据
+                factor_series = factors[factor_col]
+                # 默认使用第一个周期的收益率作为目标
+                target_col = forward_returns.columns[0]
+                target_series = forward_returns[target_col]
+                
+                # 计算PSI
+                train_end_idx = int(len(factor_series) * 0.8)
+                psi = self._calculate_psi(factor_series, train_end_idx)
+                
+                # 计算KS
+                ks_stat, ks_p = self._calculate_ks(factor_series, train_end_idx)
+                
+                # 计算IC衰减 (如果有价格数据)
+                ic_decay = None
+                half_life = np.nan
+                if self.prices is not None:
+                    ic_decay, half_life = self._calculate_ic_decay(factor_series, self.prices)
+                
+                quality_reports[factor_col] = {
+                    'psi': psi,
+                    'ks_stat': ks_stat,
+                    'ks_p': ks_p,
+                    'ic_half_life': half_life,
+                    'ic_decay': ic_decay
+                }
+                
+                print(f"   {factor_col}:")
+                print(f"      PSI: {psi:.4f}")
+                print(f"      KS p-value: {ks_p:.4f}")
+                if not np.isnan(half_life):
+                    print(f"      IC半衰期: {half_life:.1f}天")
+            
+            self.results['quality_reports'] = quality_reports
+
         print("\n" + "=" * 70)
         print("✅ 分析完成")
         print("=" * 70 + "\n")
         
         return self
+
+    def _calculate_psi(self, factor: pd.Series, train_end_idx: int, n_bins: int = 10) -> float:
+        """内部方法: 计算PSI"""
+        try:
+            train_factor = factor.iloc[:train_end_idx].dropna()
+            test_factor = factor.iloc[train_end_idx:].dropna()
+            
+            if len(train_factor) < 30 or len(test_factor) < 30:
+                return np.nan
+            
+            _, bin_edges = pd.qcut(train_factor, q=n_bins, retbins=True, duplicates='drop')
+            
+            train_dist, _ = np.histogram(train_factor, bins=bin_edges)
+            test_dist, _ = np.histogram(test_factor, bins=bin_edges)
+            
+            train_pct = train_dist / len(train_factor)
+            test_pct = test_dist / len(test_factor)
+            
+            train_pct = np.where(train_pct == 0, 0.0001, train_pct)
+            test_pct = np.where(test_pct == 0, 0.0001, test_pct)
+            
+            return np.sum((test_pct - train_pct) * np.log(test_pct / train_pct))
+        except:
+            return np.nan
+
+    def _calculate_ks(self, factor: pd.Series, train_end_idx: int) -> Tuple[float, float]:
+        """内部方法: 计算KS统计量"""
+        try:
+            train_factor = factor.iloc[:train_end_idx].dropna()
+            test_factor = factor.iloc[train_end_idx:].dropna()
+            
+            if len(train_factor) < 30 or len(test_factor) < 30:
+                return np.nan, np.nan
+            
+            return ks_2samp(train_factor, test_factor)
+        except:
+            return np.nan, np.nan
+
+    def _calculate_ic_decay(self, factor: pd.Series, prices: pd.DataFrame, max_period: int = 20) -> Tuple[pd.DataFrame, float]:
+        """内部方法: 计算IC衰减"""
+        try:
+            ic_decay = []
+            for period in range(1, max_period + 1):
+                forward_return = prices['close'].pct_change(period).shift(-period)
+                valid_mask = factor.notna() & forward_return.notna()
+                if valid_mask.sum() < 30:
+                    continue
+                ic, _ = stats.spearmanr(factor[valid_mask], forward_return[valid_mask])
+                ic_decay.append({'period': period, 'ic': ic, 'abs_ic': abs(ic)})
+            
+            decay_df = pd.DataFrame(ic_decay)
+            if decay_df.empty:
+                return pd.DataFrame(), np.nan
+                
+            initial_ic = abs(decay_df.iloc[0]['ic'])
+            half_ic = initial_ic * 0.5
+            below_half = decay_df[decay_df['abs_ic'] < half_ic]
+            half_life = below_half.iloc[0]['period'] if not below_half.empty else max_period
+            return decay_df, half_life
+        except:
+            return pd.DataFrame(), np.nan
     
     def _apply_tradable_mask(self, data: pd.DataFrame) -> pd.DataFrame:
         """应用可交易性过滤"""

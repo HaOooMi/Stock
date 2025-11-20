@@ -16,7 +16,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    因子工厂 v1 系统架构                        │
+│                    因子工厂 v1 系统架构                      │
 └─────────────────────────────────────────────────────────────┘
 
 1️⃣  数据加载层
@@ -30,16 +30,19 @@
          ├─ 动量/反转族 (12个因子)
          ├─ 波动率族 (8个因子)
          ├─ 量价微观结构族 (9个因子)
-         └─ 风格/质量族 (3个因子)
+         ├─ 风格/质量族 (3个因子)
+         └─ v1核心精选 (5个因子)
 
-3️⃣  质量检查层
-    └─ factor_quality_checker.py (新)
+3️⃣  质量检查层（集成到CrossSectionAnalyzer）
+    └─ evaluation/cross_section_analyzer.py
          ├─ IC/ICIR检查
-         ├─ IC衰减分析
-         ├─ PSI/KS分布检查
+         ├─ IC衰减分析（check_quality=True时启用）
+         ├─ PSI/KS分布检查（check_quality=True时启用）
          ├─ 相关性检查
          ├─ 单调性检查
-         └─ 综合评分
+         ├─ 分位数收益分析
+         ├─ Spread计算
+         └─ 换手率统计
 
 4️⃣  因子库管理层
     └─ factor_library_manager.py (新)
@@ -60,10 +63,16 @@
 ```
 machine learning/
 ├── features/
-│   ├── factor_factory.py              # 因子工厂（935行）
-│   ├── factor_quality_checker.py      # 质量检查器（680行）
+│   ├── factor_factory.py              # 因子工厂（940行）
 │   ├── factor_library_manager.py      # 库管理器（490行）
 │   └── test_factor_system.py          # 系统测试（260行）
+│
+├── evaluation/
+│   ├── cross_section_analyzer.py      # 横截面分析器（含质量检查）（750行）
+│   ├── cross_section_metrics.py       # 核心度量计算（600行）
+│   ├── factor_preprocessing.py        # 因子预处理（400行）
+│   ├── tearsheet.py                   # 报告生成（400行）
+│   └── visualization.py               # 图表生成（600行）
 │
 ├── pipelines/
 │   └── prepare_factors.py             # 因子准备流程（330行）
@@ -140,46 +149,71 @@ registry = factory.get_factor_registry()
 
 ---
 
-### 2. FactorQualityChecker (质量检查器)
+### 2. CrossSectionAnalyzer (横截面分析器 + 质量检查)
 
-**功能**：6层严格质量检查
+**功能**：统一的因子评估与质量检查接口
 
-**检查项**：
+**核心评估指标**：
 
 | 检查层 | 指标 | 阈值 | 说明 |
 |-------|------|------|------|
-| 1️⃣ IC/ICIR | Rank IC均值 | > 0.02 | 信息系数（横截面） |
+| 1️⃣ IC/ICIR | Rank IC均值 | > 0.02 | 信息系数（横截面Spearman） |
 |  | ICIR年化 | > 0.5 | 信息系数风险比 |
-| 2️⃣ IC衰减 | 半衰期 | 统计检验 | IC随时间衰减速度 |
-| 3️⃣ 分布稳定性 | PSI | < 0.25 | Population Stability Index |
-| 4️⃣ 分布差异 | KS统计量 | 统计检验 | Kolmogorov-Smirnov test |
-| 5️⃣ 相关性 | 与已有因子 | < 0.7 | 避免冗余因子 |
-| 6️⃣ 单调性 | Kendall τ | 统计检验 | 因子与收益单调关系 |
+| 2️⃣ 分位数收益 | Top-Mean Spread | > 0 | 顶部分位数超额收益 |
+| 3️⃣ 单调性 | Kendall τ | 统计显著 | 因子与收益单调关系 |
+| 4️⃣ 换手率 | 平均换手率 | 统计记录 | 持仓变化频率 |
+
+**深度质量检查**（`check_quality=True`时启用）：
+
+| 额外检查 | 指标 | 阈值 | 说明 |
+|---------|------|------|------|
+| 5️⃣ IC衰减 | 半衰期 | 统计分析 | IC随时间衰减速度 |
+| 6️⃣ 分布稳定性 | PSI | < 0.25 | Population Stability Index |
+| 7️⃣ 分布差异 | KS统计量 | p > 0.05 | Kolmogorov-Smirnov test |
 
 **使用示例**：
 ```python
-from features.factor_quality_checker import FactorQualityChecker
+from evaluation.cross_section_analyzer import CrossSectionAnalyzer
 
-# 创建检查器
-checker = FactorQualityChecker(
-    ic_threshold=0.02,
-    icir_threshold=0.5,
-    psi_threshold=0.25,
-    corr_threshold=0.7
+# 创建分析器
+analyzer = CrossSectionAnalyzer(
+    factors=factors_df,
+    forward_returns=forward_returns_df,
+    tradable_mask=tradable_mask,
+    market_cap=market_cap,
+    industry=industry
 )
 
-# 综合检查
-report = checker.comprehensive_check(
-    factor_values=factor_series,
-    target_values=target_series,
-    existing_factors=qualified_factors_df
+# 预处理
+analyzer.preprocess(
+    winsorize=True,
+    standardize=True,
+    neutralize=True
 )
 
-# 检查是否通过
-if report['overall_pass']:
-    print("✅ 因子通过质量检查")
-else:
-    print(f"❌ 拒绝原因: {report['fail_reasons']}")
+# 标准分析
+analyzer.analyze(
+    n_quantiles=5,
+    ic_method='spearman',
+    spread_method='top_minus_mean'
+)
+
+# 深度质量检查（可选）
+analyzer.analyze(
+    n_quantiles=5,
+    check_quality=True  # 启用PSI/KS/IC衰减检查
+)
+
+# 获取结果
+results = analyzer.get_results()
+ic_summary = results['ic_summary']
+spread_summary = results['spread_summaries']
+
+# 深度检查结果（如果启用）
+if 'quality_reports' in results:
+    quality = results['quality_reports']
+    print(f"PSI: {quality['psi']:.4f}")
+    print(f"IC半衰期: {quality['ic_half_life']:.1f}天")
 ```
 
 ---

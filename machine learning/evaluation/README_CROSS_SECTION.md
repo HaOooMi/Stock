@@ -49,6 +49,12 @@
 - 换手率时间序列图
 - 月度IC热力图
 
+✅ **深度质量检查**（`check_quality=True`启用）
+- IC衰减曲线与半衰期计算
+- PSI（Population Stability Index）分布稳定性检验
+- KS（Kolmogorov-Smirnov）分布差异检验
+- 训练集/测试集稳定性验证
+
 ✅ **专业报告输出**
 - HTML格式Tearsheet报告（响应式设计）
 - 自动因子评估（优秀/合格/弱）
@@ -65,10 +71,12 @@
 |------|------|------|--------|
 | 核心度量 | `cross_section_metrics.py` | Forward Returns, IC, ICIR, Spread, 换手率等 | ~600行 |
 | 因子预处理 | `factor_preprocessing.py` | Winsorize, 标准化, 中性化 | ~400行 |
-| 分析器 | `cross_section_analyzer.py` | 统一评估接口, 流程编排 | ~500行 |
+| 分析器 | `cross_section_analyzer.py` | 统一评估接口, 流程编排, **深度质量检查** | ~750行 |
 | 可视化 | `visualization.py` | 7种专业图表 | ~600行 |
 | 报告生成 | `tearsheet.py` | HTML报告, CSV导出 | ~400行 |
 | 示例脚本 | `run_cross_section_analysis.py` | 端到端示例 | ~300行 |
+
+**注**：v1.1 版本将质量检查功能（PSI/KS/IC衰减）整合到 `CrossSectionAnalyzer` 中，通过 `check_quality=True` 参数启用。
 
 ### 输出目录结构
 

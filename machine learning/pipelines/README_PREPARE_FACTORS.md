@@ -12,33 +12,37 @@ prepare_factors.py (主流程)
 │   └── load_market_data_batch() #   返回MultiIndex[date, ticker]
 ├── features.FactorFactory       # 步骤3: 生成因子
 ├── evaluation (横截面评估框架)   # 步骤4: 因子质量检查 ⭐核心
-│   ├── CrossSectionAnalyzer     #   - 统一评估接口
-│   ├── cross_section_metrics    #   - IC/ICIR/Spread/单调性
+│   ├── CrossSectionAnalyzer     #   - 统一评估接口 + 深度质量检查
+│   │                             #     * 标准分析: IC/ICIR/Spread/单调性/换手率
+│   │                             #     * 深度检查: IC衰减/PSI/KS (check_quality=True)
+│   ├── cross_section_metrics    #   - IC/ICIR/Spread/单调性/换手率计算
 │   ├── factor_preprocessing     #   - Winsorize/标准化/中性化
-│   ├── factor_quality_checker   #   - 补充检查（IC半衰期、PSI/KS、相关性）
 │   ├── tearsheet                #   - HTML报告生成
 │   └── visualization            #   - 图表生成
 ├── features.FactorLibraryManager # 步骤5: 因子入库
 └── 报告输出                      # 步骤6: Tearsheet报告
 ```
 
-### 模块分工说明
+### 模块功能说明
 
-**CrossSectionAnalyzer (主评估):**
+**CrossSectionAnalyzer (统一评估接口):**
+
+**标准分析模式** (`analyzer.analyze()`)
 - ✅ Rank IC / ICIR（每日横截面Spearman）
 - ✅ 分位数收益 & 单调性（Kendall τ）
 - ✅ Top-Mean Spread
 - ✅ 换手率统计
+- ✅ 生成Tearsheet报告
 
-**FactorQualityChecker (补充检查):**
+**深度质量检查模式** (`analyzer.analyze(check_quality=True)`)
 - ✅ IC半衰期与IC Decay曲线（时间衰减特性）
-- ✅ PSI/KS测试（分布稳定性）
-- ✅ 相关性检查（避免冗余因子）
+- ✅ PSI测试（分布稳定性，训练集vs测试集）
+- ✅ KS测试（Kolmogorov-Smirnov分布差异检验）
 
-**为什么两者都需要？**
-- CrossSectionAnalyzer: 横截面"预测能力"评估（标准Alphalens流程）
-- FactorQualityChecker: 因子"稳定性与独特性"检查（因子工厂特有需求）
-- 两者结合，确保因子既有预测力又足够稳健
+**设计理念:**
+- 日常使用标准模式即可（快速，覆盖核心指标）
+- 因子入库前启用深度检查（确保稳定性与独特性）
+- 统一接口，避免维护多套评估系统
 
 ## 🎯 工作流程
 
@@ -106,11 +110,19 @@ for factor_name in all_factors_df.columns:
         neutralize=True  # 可选
     )
     
-    # 运行完整分析
+    # 运行完整分析（标准模式）
     analyzer.analyze(
         n_quantiles=5,
         ic_method='spearman',
         spread_method='top_minus_mean'
+    )
+    
+    # 或启用深度质量检查
+    analyzer.analyze(
+        n_quantiles=5,
+        ic_method='spearman',
+        spread_method='top_minus_mean',
+        check_quality=True  # 额外计算PSI/KS/IC衰减
     )
     
     # 获取结果
