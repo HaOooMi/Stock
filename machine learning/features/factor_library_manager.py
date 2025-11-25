@@ -140,6 +140,16 @@ class FactorLibraryManager:
         # 添加到清单
         self.factor_list.append(factor_name)
         
+        # 兼容两种格式：扁平格式和嵌套格式
+        if 'ic_metrics' in quality_report:
+            # 嵌套格式
+            ic_mean = quality_report['ic_metrics']['ic_mean']
+            icir_annual = quality_report['ic_metrics']['icir_annual']
+        else:
+            # 扁平格式
+            ic_mean = quality_report.get('ic_mean', np.nan)
+            icir_annual = quality_report.get('icir_annual', np.nan)
+        
         # 保存元数据
         self.factor_metadata[factor_name] = {
             'formula': formula,
@@ -147,11 +157,12 @@ class FactorLibraryManager:
             'reference': reference,
             'added_date': datetime.now().isoformat(),
             'quality_report': {
-                'ic_mean': quality_report['ic_metrics']['ic_mean'],
-                'icir_annual': quality_report['ic_metrics']['icir_annual'],
+                'ic_mean': ic_mean,
+                'icir_annual': icir_annual,
                 'psi': quality_report.get('psi', np.nan),
                 'ic_half_life': quality_report.get('ic_half_life', np.nan),
-                'max_corr': quality_report.get('corr_check', {}).get('max_corr', 0.0)
+                'max_corr': quality_report.get('corr_check', {}).get('max_corr', 
+                            quality_report.get('max_correlation', 0.0))
             },
             'status': 'active',
             'version': 1
@@ -246,11 +257,19 @@ class FactorLibraryManager:
     
     def _record_quality_history(self, factor_name: str, quality_report: Dict):
         """记录质量历史"""
+        # 兼容两种格式：扁平格式和嵌套格式
+        if 'ic_metrics' in quality_report:
+            ic_mean = quality_report['ic_metrics']['ic_mean']
+            icir_annual = quality_report['ic_metrics']['icir_annual']
+        else:
+            ic_mean = quality_report.get('ic_mean', np.nan)
+            icir_annual = quality_report.get('icir_annual', np.nan)
+        
         history_record = {
             'factor_name': factor_name,
             'timestamp': datetime.now().isoformat(),
-            'ic_mean': quality_report['ic_metrics']['ic_mean'],
-            'icir_annual': quality_report['ic_metrics']['icir_annual'],
+            'ic_mean': ic_mean,
+            'icir_annual': icir_annual,
             'psi': quality_report.get('psi', np.nan),
             'ic_half_life': quality_report.get('ic_half_life', np.nan),
             'overall_pass': quality_report.get('overall_pass', False)

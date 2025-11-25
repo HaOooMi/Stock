@@ -91,8 +91,8 @@ def load_config(config_path: str = "configs/ml_baseline.yml") -> dict:
 
 
 def prepare_factors(config_path: str = "configs/ml_baseline.yml",
-                   start_date: str = "2020-01-01",
-                   end_date: str = "2024-12-31",
+                   start_date: str = None,
+                   end_date: str = None,
                    tickers: list = None):
     """
     因子准备完整流程
@@ -124,12 +124,33 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     
     # 从配置中提取参数
     influxdb_config = config['data']['influxdb']
-    target_config = config['targets']
-    tradability_config = config['data'].get('tradability_filter', {})
+    target_config = config.get('target', {})  # 注意：配置文件用的是 'target' 单数
+    tradability_config = config['data'].get('universe', {})  # 使用 'universe' 而不是 'tradability_filter'
+    
+    # 如果没有传入日期参数，从配置文件读取
+    if start_date is None:
+        start_date = config['data'].get('start_date', '2018-01-01')
+    if end_date is None:
+        end_date = config['data'].get('end_date', '2024-12-31')
+    
+    # 如果没有传入股票列表，从配置文件读取
+    # 注意：InfluxDB 中存储的股票代码是纯数字格式（如 '000001'），不带后缀
+    if tickers is None:
+        tickers = config['data'].get('symbol', None)
+        if isinstance(tickers, str):
+            tickers = [tickers]
+    
+    # 设置默认值
+    if 'type' not in target_config:
+        target_config['type'] = 'forward_return'
+    if 'horizon' not in target_config:
+        target_config['horizon'] = target_config.get('forward_periods', 5)
     
     print(f"✅ 配置加载完成")
     print(f"   InfluxDB: {influxdb_config['url']}")
-    print(f"   预测目标: {target_config['type']} ({target_config['horizon']}日)")
+    print(f"   预测目标: {target_config.get('name', 'future_return_5d')} ({target_config['horizon']}日)")
+    print(f"   日期范围: {start_date} ~ {end_date}")
+    print(f"   股票代码: {tickers}")
     
     # 2. 加载数据（使用MarketDataLoader批量加载）
     print("\n" + "=" * 80)
@@ -247,12 +268,11 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     
     print(f"\n🔍 开始横截面评估 (共 {all_factors_df.shape[1]} 个因子)...\n")
     
-    # 预处理配置
+    # 预处理配置 - 使用默认值即可
     preprocess_config = {
         'winsorize': True,
-        'winsorize_limits': (0.01, 0.99),
-        'standardize': 'zscore',
-        'neutralize': None  # 可选: ['market_cap', 'industry']
+        'standardize': True,
+        'neutralize': False  # 可选: True (需要market_cap/industry)
     }
     
     for i, factor_name in enumerate(all_factors_df.columns, 1):
@@ -262,32 +282,30 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             # 构建单因子DataFrame
             single_factor_df = all_factors_df[[factor_name]]
             
-            # 使用你的CrossSectionAnalyzer！
+            # 使用你的CrossSectionAnalyzer！（一次性完成所有分析，包括深度质量检查）
             analyzer = CrossSectionAnalyzer(
                 factors=single_factor_df,
                 forward_returns=forward_returns_df,
+                prices=prices_df if 'close' in features_df.columns else None,
                 tradable_mask=tradable_mask,
                 market_cap=market_cap,
                 industry=industry
             )
             
-            # 预处理（使用你的预处理管道）
-            if preprocess_config.get('winsorize') or preprocess_config.get('standardize'):
-                analyzer.preprocess(
-                    winsorize=preprocess_config.get('winsorize', True),
-                    standardize=preprocess_config.get('standardize') is not None,
-                    neutralize=preprocess_config.get('neutralize') is not None,
-                    winsorize_limits=preprocess_config.get('winsorize_limits', (0.01, 0.99)),
-                    standardize_method=preprocess_config.get('standardize', 'zscore'),
-                    neutralize_factors=preprocess_config.get('neutralize')
-                )
+            # 预处理（使用默认参数）
+            analyzer.preprocess(
+                winsorize=preprocess_config.get('winsorize', True),
+                standardize=preprocess_config.get('standardize', True),
+                neutralize=preprocess_config.get('neutralize', False)
+            )
             
-            # 运行完整分析
+            # 运行完整分析（一次到位，包含深度质量检查）
             analyzer.analyze(
                 n_quantiles=5,
                 ic_method='spearman',
                 spread_method='top_minus_mean',  # 实盘更稳健
-                periods_per_year=252
+                periods_per_year=252,
+                check_quality=True  # 开启深度检查（PSI/KS/IC衰减）
             )
             
             # 获取结果
@@ -295,38 +313,32 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             
             # 提取关键指标（key为(factor_name, 'ret_5d')）
             key_5d = (factor_name, 'ret_5d')
-            ic_summary = results['ic_summary'][key_5d]
-            spread_summary = results['spread_summary'][key_5d]
-            monotonicity = results['monotonicity'][key_5d]
+            
+            # 安全获取各项指标（股票数太少时可能缺失）
+            ic_summary = results.get('ic_summary', {}).get(key_5d, {})
+            spread_summary = results.get('spread_summary', {}).get(key_5d, {})
+            monotonicity = results.get('monotonicity', {}).get(key_5d, {})
+            quality_report = results.get('quality_reports', {}).get(factor_name, {})
+            
+            # 如果缺少关键指标，跳过此因子
+            if not ic_summary:
+                print(f"   ⚠️  IC数据不足，跳过")
+                continue
             
             # 判断是否通过（横截面评估的核心指标）
-            pass_ic = ic_summary['mean'] >= IC_THRESHOLD and ic_summary['p_value'] < 0.05
-            pass_icir = ic_summary['icir_annual'] >= ICIR_THRESHOLD
-            pass_spread = spread_summary['mean'] > SPREAD_THRESHOLD
-            pass_mono = monotonicity['kendall_tau'] > 0 and monotonicity['p_value'] < 0.05
+            ic_mean = ic_summary.get('mean', 0)
+            ic_pvalue = ic_summary.get('p_value', 1)
+            icir_annual = ic_summary.get('icir_annual', 0)
+            spread_mean = spread_summary.get('mean', np.nan)
+            kendall_tau = monotonicity.get('kendall_tau', np.nan)
+            mono_pvalue = monotonicity.get('p_value', 1)
             
-            # 使用 CrossSectionAnalyzer 的深度质量检查功能（PSI/KS/IC衰减）
-            # 重新运行分析器，这次开启 check_quality
-            analyzer_quality = CrossSectionAnalyzer(
-                factors=single_factor_df[[factor_name]],
-                forward_returns=forward_returns_df,
-                prices=prices_df if 'close' in features_df.columns else None,
-                tradable_mask=tradable_mask
-            )
-            analyzer_quality.preprocess(
-                winsorize=True,
-                standardize=True,
-                neutralize=False
-            )
-            analyzer_quality.analyze(
-                n_quantiles=5,
-                ic_method='spearman',
-                check_quality=True  # 开启深度检查
-            )
-            quality_results = analyzer_quality.get_results()
+            pass_ic = ic_mean >= IC_THRESHOLD and ic_pvalue < 0.05
+            pass_icir = icir_annual >= ICIR_THRESHOLD
+            pass_spread = spread_mean > SPREAD_THRESHOLD if not np.isnan(spread_mean) else False
+            pass_mono = kendall_tau > 0 and mono_pvalue < 0.05 if not np.isnan(kendall_tau) else False
             
-            # 提取质量报告
-            quality_report = quality_results.get('quality_reports', {}).get(factor_name, {})
+            # 深度质量检查结果
             pass_psi = quality_report.get('psi', 1.0) < 0.25
             pass_ks = quality_report.get('ks_p', 0) > 0.05
             
@@ -339,16 +351,19 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
                 max_corr = corrs.max()
                 pass_corr = max_corr < CORR_THRESHOLD
             
-            # 核心指标必须通过，补充指标可降权
-            overall_pass = pass_ic and pass_icir and pass_spread and pass_corr
+            # 核心指标：IC必须通过，其他指标在数据充足时才检查
+            # 股票数太少时，Spread和单调性可能为NaN，放宽条件
+            overall_pass = pass_ic and pass_icir and pass_corr
+            if not np.isnan(spread_mean):
+                overall_pass = overall_pass and pass_spread
             
             # 保存报告
             quality_reports[factor_name] = {
-                'ic_mean': ic_summary['mean'],
-                'icir_annual': ic_summary['icir_annual'],
-                'ic_pvalue': ic_summary['p_value'],
-                'spread': spread_summary['mean'],
-                'monotonicity_tau': monotonicity['kendall_tau'],
+                'ic_mean': ic_mean,
+                'icir_annual': icir_annual,
+                'ic_pvalue': ic_pvalue,
+                'spread': spread_mean,
+                'monotonicity_tau': kendall_tau,
                 'max_correlation': max_corr,
                 'ic_half_life': quality_report.get('ic_half_life', np.nan),
                 'psi': quality_report.get('psi', np.nan),
@@ -367,16 +382,18 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             if overall_pass:
                 qualified_factors.append(factor_name)
                 print(f"   ✅ 通过")
-                print(f"      IC={ic_summary['mean']:.4f} (ICIR={ic_summary['icir_annual']:.2f})")
-                print(f"      Spread={spread_summary['mean']:.4f}, τ={monotonicity['kendall_tau']:.3f}")
+                print(f"      IC={ic_mean:.4f} (ICIR={icir_annual:.2f})")
+                spread_str = f"{spread_mean:.4f}" if not np.isnan(spread_mean) else "N/A"
+                tau_str = f"{kendall_tau:.3f}" if not np.isnan(kendall_tau) else "N/A"
+                print(f"      Spread={spread_str}, τ={tau_str}")
             else:
                 fail_reasons = []
                 if not pass_ic: fail_reasons.append("IC不显著")
                 if not pass_icir: fail_reasons.append("ICIR过低")
-                if not pass_spread: fail_reasons.append("Spread≤0")
+                if not pass_spread and not np.isnan(spread_mean): fail_reasons.append("Spread≤0")
                 if not pass_corr: fail_reasons.append("与已有因子高度相关")
                 
-                print(f"   ❌ 拒绝 | {', '.join(fail_reasons)}")
+                print(f"   ❌ 拒绝 | {', '.join(fail_reasons) if fail_reasons else 'IC条件未满足'}")
         
         except Exception as e:
             print(f"   ⚠️  评估失败: {str(e)}")
@@ -536,7 +553,13 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     significant_factors = []
     for factor_name in qualified_factors:
         report = quality_reports[factor_name]
-        if report['ic_metrics']['pass_ic']:
+        # 兼容扁平格式（pass_ic）和嵌套格式（ic_metrics.pass_ic）
+        if 'ic_metrics' in report:
+            pass_ic = report['ic_metrics']['pass_ic']
+        else:
+            pass_ic = report.get('pass_ic', False)
+        
+        if pass_ic:
             significant_factors.append(factor_name)
     
     print(f"   要求: IC > 0.02 且统计显著")
@@ -555,7 +578,13 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     
     # 简单组合测试：所有因子等权平均
     combined_factor = qualified_factors_df.mean(axis=1)
-    target_values = targets_df[target_config['type']]
+    # 使用 5日收益作为目标（与因子评估一致）
+    target_col = f"ret_{target_config['horizon']}d"
+    if target_col in targets_df.columns:
+        target_values = targets_df[target_col]
+    else:
+        # 回退到第一个可用列
+        target_values = targets_df.iloc[:, 0]
     
     # 计算组合IC
     aligned_df = pd.DataFrame({
@@ -566,8 +595,14 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     grouped = aligned_df.groupby(level='date')
     ic_series = grouped.apply(lambda x: x['factor'].corr(x['target'], method='spearman'))
     
-    combined_ic = ic_series.mean()
-    combined_icir = ic_series.mean() / ic_series.std() * np.sqrt(252)
+    # 确保 ic_series 是一维的，取标量值
+    if hasattr(ic_series, 'values'):
+        ic_values = ic_series.values.flatten()
+        combined_ic = float(np.nanmean(ic_values))
+        combined_icir = float(np.nanmean(ic_values) / np.nanstd(ic_values) * np.sqrt(252)) if np.nanstd(ic_values) > 0 else 0.0
+    else:
+        combined_ic = float(ic_series) if not pd.isna(ic_series) else 0.0
+        combined_icir = 0.0
     
     print(f"   组合IC: {combined_ic:.4f}")
     print(f"   组合ICIR: {combined_icir:.2f}")
@@ -593,13 +628,27 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
 if __name__ == "__main__":
     """运行因子准备流程"""
     
-    # 测试参数
-    tickers = ['000001.SZ', '000002.SZ', '000063.SZ']  # 测试用股票
+    # 加载配置文件获取参数
+    config = load_config("configs/ml_baseline.yml")
+    
+    # 从配置文件读取股票代码（纯数字格式，如 '000001'，不是 '000001.SZ'）
+    # 因为 InfluxDB 中存储的股票代码是纯数字格式
+    tickers = config['data'].get('symbol', ['000001', '000002', '000063'])
+    if isinstance(tickers, str):
+        tickers = [tickers]
+    
+    # 从配置文件读取日期范围
+    start_date = config['data'].get('start_date', '2018-01-01')
+    end_date = config['data'].get('end_date', '2024-12-31')
+    
+    print(f"\n📋 从配置文件读取参数:")
+    print(f"   股票代码: {tickers}")
+    print(f"   日期范围: {start_date} ~ {end_date}")
     
     qualified_factors_df, quality_reports, manager = prepare_factors(
         config_path="configs/ml_baseline.yml",
-        start_date="2020-01-01",
-        end_date="2024-12-31",
+        start_date=start_date,
+        end_date=end_date,
         tickers=tickers
     )
     

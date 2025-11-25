@@ -11,6 +11,11 @@
 5. Spread计算（Top-Mean, Top-Bottom）
 6. 单调性检验（Kendall τ）
 7. 因子换手率
+
+性能优化：
+- 使用numpy向量化运算
+- 可选numba JIT加速
+- 避免groupby().apply()开销
 """
 
 import pandas as pd
@@ -20,6 +25,63 @@ from scipy import stats
 import warnings
 
 warnings.filterwarnings('ignore')
+
+# 尝试导入numba进行JIT加速
+try:
+    from numba import jit, prange
+    HAS_NUMBA = True
+except ImportError:
+    HAS_NUMBA = False
+    # 定义空装饰器
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    prange = range
+
+
+# ============== Numba加速的核心计算函数 ==============
+
+@jit(nopython=True, cache=True)
+def _rank_array(arr: np.ndarray) -> np.ndarray:
+    """快速计算排名（用于Spearman相关）"""
+    n = len(arr)
+    ranks = np.empty(n, dtype=np.float64)
+    order = np.argsort(arr)
+    ranks[order] = np.arange(1, n + 1, dtype=np.float64)
+    return ranks
+
+
+@jit(nopython=True, cache=True)
+def _spearman_corr(x: np.ndarray, y: np.ndarray) -> float:
+    """快速Spearman相关系数"""
+    n = len(x)
+    if n < 3:
+        return np.nan
+    
+    # 计算排名
+    rx = _rank_array(x)
+    ry = _rank_array(y)
+    
+    # Pearson相关
+    mx = rx.mean()
+    my = ry.mean()
+    
+    num = 0.0
+    dx2 = 0.0
+    dy2 = 0.0
+    
+    for i in range(n):
+        dx = rx[i] - mx
+        dy = ry[i] - my
+        num += dx * dy
+        dx2 += dx * dx
+        dy2 += dy * dy
+    
+    denom = np.sqrt(dx2 * dy2)
+    if denom == 0:
+        return np.nan
+    return num / denom
 
 
 def calculate_forward_returns(prices: pd.DataFrame,
@@ -80,7 +142,7 @@ def calculate_daily_ic(factors: pd.DataFrame,
                       forward_returns: pd.DataFrame,
                       method: str = 'spearman') -> pd.DataFrame:
     """
-    计算每日横截面IC
+    计算每日横截面IC - 高性能版本（使用numpy向量化）
     
     Parameters:
     -----------
@@ -95,59 +157,73 @@ def calculate_daily_ic(factors: pd.DataFrame,
     Returns:
     --------
     pd.DataFrame
-        MultiIndex[date]，列为MultiIndex[(factor_name, return_period)]
-        每个值是该日横截面的IC
+        index=date，列为MultiIndex[(factor_name, return_period)]
     """
     # 合并数据
     data = factors.join(forward_returns, how='inner')
     
-    # 提取因子列和收益列
     factor_cols = factors.columns.tolist()
     return_cols = forward_returns.columns.tolist()
+    col_tuples = [(f, r) for f in factor_cols for r in return_cols]
     
-    # 按日期分组计算IC
-    daily_ics = []
+    # 按日期分组
+    grouped = data.groupby(level='date')
+    dates = []
+    all_ics = []
     
-    dates = data.index.get_level_values('date').unique()
-    
-    for date in dates:
-        date_data = data.xs(date, level='date')
-        
-        if len(date_data) < 3:  # 至少需要3个样本
+    for date, group in grouped:
+        if len(group) < 3:
             continue
         
-        ic_row = {'date': date}
+        dates.append(date)
+        ic_row = []
         
         for factor_col in factor_cols:
             for return_col in return_cols:
-                # 移除NaN
-                valid_mask = (
-                    date_data[factor_col].notna() & 
-                    date_data[return_col].notna()
-                )
+                f_vals = group[factor_col].values
+                r_vals = group[return_col].values
                 
-                if valid_mask.sum() < 3:
-                    ic_row[(factor_col, return_col)] = np.nan
+                # 快速移除NaN
+                mask = ~(np.isnan(f_vals) | np.isnan(r_vals))
+                if mask.sum() < 3:
+                    ic_row.append(np.nan)
                     continue
                 
-                factor_values = date_data.loc[valid_mask, factor_col]
-                return_values = date_data.loc[valid_mask, return_col]
+                f_clean = f_vals[mask]
+                r_clean = r_vals[mask]
                 
-                # 计算IC
+                # 使用numba加速的Spearman计算（如果可用）
                 if method == 'spearman':
-                    ic, _ = stats.spearmanr(factor_values, return_values)
-                elif method == 'pearson':
-                    ic, _ = stats.pearsonr(factor_values, return_values)
+                    if HAS_NUMBA:
+                        ic = _spearman_corr(f_clean, r_clean)
+                    else:
+                        # Rank转换
+                        f_rank = np.argsort(np.argsort(f_clean)).astype(float)
+                        r_rank = np.argsort(np.argsort(r_clean)).astype(float)
+                        # Pearson on ranks = Spearman
+                        n = len(f_rank)
+                        f_mean, r_mean = f_rank.mean(), r_rank.mean()
+                        cov = ((f_rank - f_mean) * (r_rank - r_mean)).sum()
+                        f_std = np.sqrt(((f_rank - f_mean) ** 2).sum())
+                        r_std = np.sqrt(((r_rank - r_mean) ** 2).sum())
+                        ic = cov / (f_std * r_std) if f_std > 0 and r_std > 0 else np.nan
                 else:
-                    raise ValueError(f"不支持的方法: {method}")
+                    # Pearson
+                    f_mean, r_mean = f_clean.mean(), r_clean.mean()
+                    cov = ((f_clean - f_mean) * (r_clean - r_mean)).sum()
+                    f_std = np.sqrt(((f_clean - f_mean) ** 2).sum())
+                    r_std = np.sqrt(((r_clean - r_mean) ** 2).sum())
+                    ic = cov / (f_std * r_std) if f_std > 0 and r_std > 0 else np.nan
                 
-                ic_row[(factor_col, return_col)] = ic
+                ic_row.append(ic)
         
-        daily_ics.append(ic_row)
+        all_ics.append(ic_row)
     
-    # 构建DataFrame
-    result = pd.DataFrame(daily_ics).set_index('date')
-    result.columns = pd.MultiIndex.from_tuples(result.columns)
+    if not dates:
+        return pd.DataFrame(columns=pd.MultiIndex.from_tuples(col_tuples))
+    
+    result = pd.DataFrame(all_ics, index=dates, columns=pd.MultiIndex.from_tuples(col_tuples))
+    result.index.name = 'date'
     
     return result
 
@@ -216,7 +292,7 @@ def calculate_quantile_returns(factors: pd.DataFrame,
                                n_quantiles: int = 5,
                                quantile_method: str = 'quantile') -> Dict[str, pd.DataFrame]:
     """
-    计算分位数组合收益
+    计算分位数组合收益 - 高性能版本
     
     Parameters:
     -----------
@@ -236,7 +312,6 @@ def calculate_quantile_returns(factors: pd.DataFrame,
         {(factor_name, return_period): pd.DataFrame}
         DataFrame: index=date, columns=[Q1, Q2, ..., Qn]
     """
-    # 合并数据
     data = factors.join(forward_returns, how='inner')
     
     factor_cols = factors.columns.tolist()
@@ -244,56 +319,56 @@ def calculate_quantile_returns(factors: pd.DataFrame,
     
     quantile_returns = {}
     
+    # 按日期分组
+    grouped = data.groupby(level='date')
+    
     for factor_col in factor_cols:
         for return_col in return_cols:
-            # 按日期分组
-            daily_quantile_rets = []
+            dates = []
+            q_returns = []
             
-            dates = data.index.get_level_values('date').unique()
-            
-            for date in dates:
-                date_data = data.xs(date, level='date')
+            for date, group in grouped:
+                f_vals = group[factor_col].values
+                r_vals = group[return_col].values
                 
                 # 移除NaN
-                valid_mask = (
-                    date_data[factor_col].notna() & 
-                    date_data[return_col].notna()
-                )
-                
-                if valid_mask.sum() < n_quantiles:
+                mask = ~(np.isnan(f_vals) | np.isnan(r_vals))
+                if mask.sum() < n_quantiles:
                     continue
                 
-                valid_data = date_data[valid_mask]
+                f_clean = f_vals[mask]
+                r_clean = r_vals[mask]
                 
-                # 分位数分组
-                if quantile_method == 'quantile':
-                    valid_data['quantile'] = pd.qcut(
-                        valid_data[factor_col],
-                        q=n_quantiles,
-                        labels=False,
-                        duplicates='drop'
-                    )
-                elif quantile_method == 'equal_width':
-                    valid_data['quantile'] = pd.cut(
-                        valid_data[factor_col],
-                        bins=n_quantiles,
-                        labels=False
-                    )
-                else:
-                    raise ValueError(f"不支持的方法: {quantile_method}")
-                
-                # 计算每个分位数的平均收益
-                quantile_ret = valid_data.groupby('quantile')[return_col].mean()
-                
-                ret_row = {'date': date}
-                for q in range(n_quantiles):
-                    ret_row[f'Q{q+1}'] = quantile_ret.get(q, np.nan)
-                
-                daily_quantile_rets.append(ret_row)
+                # 快速分位数计算
+                try:
+                    if quantile_method == 'quantile':
+                        # 使用numpy的percentile
+                        edges = np.percentile(f_clean, np.linspace(0, 100, n_quantiles + 1))
+                        edges[0] = -np.inf
+                        edges[-1] = np.inf
+                        q_labels = np.digitize(f_clean, edges[1:-1])
+                    else:
+                        edges = np.linspace(f_clean.min(), f_clean.max(), n_quantiles + 1)
+                        q_labels = np.digitize(f_clean, edges[1:-1])
+                    
+                    # 计算每个分位的平均收益
+                    q_ret = []
+                    for q in range(n_quantiles):
+                        q_mask = (q_labels == q)
+                        if q_mask.sum() > 0:
+                            q_ret.append(r_clean[q_mask].mean())
+                        else:
+                            q_ret.append(np.nan)
+                    
+                    dates.append(date)
+                    q_returns.append(q_ret)
+                except Exception:
+                    continue
             
-            # 构建DataFrame
-            if daily_quantile_rets:
-                df = pd.DataFrame(daily_quantile_rets).set_index('date')
+            if dates:
+                cols = [f'Q{i+1}' for i in range(n_quantiles)]
+                df = pd.DataFrame(q_returns, index=dates, columns=cols)
+                df.index.name = 'date'
                 quantile_returns[(factor_col, return_col)] = df
     
     return quantile_returns
@@ -403,7 +478,7 @@ def calculate_monotonicity(quantile_returns: pd.DataFrame) -> Dict:
 
 def calculate_turnover(factors: pd.DataFrame,
                       quantile: int = 4,  # Top分位（0-indexed）
-                      n_quantiles: int = 5) -> pd.Series:
+                      n_quantiles: int = 5) -> pd.DataFrame:
     """
     计算因子换手率（Top分位数的持仓变化）
     
@@ -418,7 +493,7 @@ def calculate_turnover(factors: pd.DataFrame,
         
     Returns:
     --------
-    pd.Series
+    pd.DataFrame
         每日换手率（0-1之间）
     """
     if len(factors.columns) > 1:
@@ -427,12 +502,18 @@ def calculate_turnover(factors: pd.DataFrame,
     factor_col = factors.columns[0]
     
     dates = factors.index.get_level_values('date').unique().sort_values()
+    n_stocks = factors.index.get_level_values('ticker').nunique()
+    
+    # 检查股票数量是否足够
+    if n_stocks < n_quantiles:
+        warnings.warn(f"股票数量({n_stocks})少于分位数({n_quantiles})，无法计算换手率")
+        return pd.DataFrame(columns=['turnover', 'n_current', 'n_prev', 'n_intersection'])
     
     turnovers = []
     prev_tickers = None
     
     for date in dates:
-        date_data = factors.xs(date, level='date')
+        date_data = factors.xs(date, level='date').copy()
         
         # 移除NaN
         valid_data = date_data[date_data[factor_col].notna()]
@@ -441,12 +522,16 @@ def calculate_turnover(factors: pd.DataFrame,
             continue
         
         # 分位数分组
-        valid_data['quantile'] = pd.qcut(
-            valid_data[factor_col],
-            q=n_quantiles,
-            labels=False,
-            duplicates='drop'
-        )
+        try:
+            valid_data['quantile'] = pd.qcut(
+                valid_data[factor_col],
+                q=n_quantiles,
+                labels=False,
+                duplicates='drop'
+            )
+        except ValueError:
+            # 无法分组（可能因为值太集中）
+            continue
         
         # 获取目标分位数的股票列表
         current_tickers = set(
@@ -470,6 +555,10 @@ def calculate_turnover(factors: pd.DataFrame,
             })
         
         prev_tickers = current_tickers
+    
+    if not turnovers:
+        # 返回空DataFrame
+        return pd.DataFrame(columns=['turnover', 'n_current', 'n_prev', 'n_intersection'])
     
     turnover_df = pd.DataFrame(turnovers).set_index('date')
     

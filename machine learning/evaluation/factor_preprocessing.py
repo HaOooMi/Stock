@@ -24,7 +24,7 @@ def winsorize_factor(factors: pd.DataFrame,
                     upper_quantile: float = 0.99,
                     cross_section: bool = True) -> pd.DataFrame:
     """
-    极值处理（Winsorize）
+    极值处理（Winsorize）- 向量化优化版本
     
     Parameters:
     -----------
@@ -46,41 +46,25 @@ def winsorize_factor(factors: pd.DataFrame,
     result = factors.copy()
     
     if cross_section:
-        # 按日横截面处理
-        dates = factors.index.get_level_values('date').unique()
+        # 向量化：按日横截面处理
+        def clip_quantile(s):
+            if s.notna().sum() < 3:
+                return s
+            lower = s.quantile(lower_quantile)
+            upper = s.quantile(upper_quantile)
+            return s.clip(lower=lower, upper=upper)
         
         for col in factors.columns:
-            for date in dates:
-                date_mask = factors.index.get_level_values('date') == date
-                date_values = factors.loc[date_mask, col]
-                
-                if date_values.notna().sum() < 3:
-                    continue
-                
-                # 计算分位数
-                lower_bound = date_values.quantile(lower_quantile)
-                upper_bound = date_values.quantile(upper_quantile)
-                
-                # 裁剪
-                result.loc[date_mask, col] = date_values.clip(
-                    lower=lower_bound,
-                    upper=upper_bound
-                )
+            result[col] = factors.groupby(level='date')[col].transform(clip_quantile)
     else:
         # 全局处理
         for col in factors.columns:
             values = factors[col].dropna()
-            
             if len(values) < 3:
                 continue
-            
             lower_bound = values.quantile(lower_quantile)
             upper_bound = values.quantile(upper_quantile)
-            
-            result[col] = factors[col].clip(
-                lower=lower_bound,
-                upper=upper_bound
-            )
+            result[col] = factors[col].clip(lower=lower_bound, upper=upper_bound)
     
     return result
 
@@ -89,7 +73,7 @@ def standardize_factor(factors: pd.DataFrame,
                        method: str = 'z_score',
                        cross_section: bool = True) -> pd.DataFrame:
     """
-    因子标准化
+    因子标准化 - 向量化优化版本
     
     Parameters:
     -----------
@@ -111,76 +95,63 @@ def standardize_factor(factors: pd.DataFrame,
     result = factors.copy()
     
     if cross_section:
-        # 按日横截面标准化
-        dates = factors.index.get_level_values('date').unique()
+        # 向量化：按日横截面标准化
+        if method == 'z_score':
+            def zscore_transform(s):
+                if s.notna().sum() < 3:
+                    return s
+                mean, std = s.mean(), s.std()
+                if std != 0 and not np.isnan(std):
+                    return (s - mean) / std
+                return s * 0  # 返回0
+            
+            for col in factors.columns:
+                result[col] = factors.groupby(level='date')[col].transform(zscore_transform)
         
-        for col in factors.columns:
-            for date in dates:
-                date_mask = factors.index.get_level_values('date') == date
-                date_values = factors.loc[date_mask, col]
-                
-                if date_values.notna().sum() < 3:
-                    continue
-                
-                if method == 'z_score':
-                    # Z-score标准化
-                    mean = date_values.mean()
-                    std = date_values.std()
-                    
-                    if std != 0 and not np.isnan(std):
-                        result.loc[date_mask, col] = (date_values - mean) / std
-                    else:
-                        result.loc[date_mask, col] = 0
-                
-                elif method == 'min_max':
-                    # Min-Max标准化
-                    min_val = date_values.min()
-                    max_val = date_values.max()
-                    
-                    if max_val != min_val:
-                        result.loc[date_mask, col] = (
-                            (date_values - min_val) / (max_val - min_val)
-                        )
-                    else:
-                        result.loc[date_mask, col] = 0.5
-                
-                elif method == 'rank':
-                    # 排名标准化（0-1之间）
-                    n = date_values.notna().sum()
-                    if n > 0:
-                        result.loc[date_mask, col] = (
-                            date_values.rank() - 1
-                        ) / (n - 1) if n > 1 else 0.5
-                
-                else:
-                    raise ValueError(f"不支持的标准化方法: {method}")
+        elif method == 'min_max':
+            def minmax_transform(s):
+                if s.notna().sum() < 3:
+                    return s
+                min_val, max_val = s.min(), s.max()
+                if max_val != min_val:
+                    return (s - min_val) / (max_val - min_val)
+                return s * 0 + 0.5
+            
+            for col in factors.columns:
+                result[col] = factors.groupby(level='date')[col].transform(minmax_transform)
+        
+        elif method == 'rank':
+            def rank_transform(s):
+                n = s.notna().sum()
+                if n < 2:
+                    return s * 0 + 0.5
+                return (s.rank() - 1) / (n - 1)
+            
+            for col in factors.columns:
+                result[col] = factors.groupby(level='date')[col].transform(rank_transform)
+        
+        else:
+            raise ValueError(f"不支持的标准化方法: {method}")
     
     else:
         # 全局标准化
         for col in factors.columns:
             values = factors[col].dropna()
-            
             if len(values) < 3:
                 continue
             
             if method == 'z_score':
-                mean = values.mean()
-                std = values.std()
-                
+                mean, std = values.mean(), values.std()
                 if std != 0 and not np.isnan(std):
                     result[col] = (factors[col] - mean) / std
                 else:
                     result[col] = 0
-            
             elif method == 'min_max':
-                min_val = values.min()
-                max_val = values.max()
-                
+                min_val, max_val = values.min(), values.max()
                 if max_val != min_val:
                     result[col] = (factors[col] - min_val) / (max_val - min_val)
                 else:
                     result[col] = 0.5
-            
             elif method == 'rank':
                 result[col] = factors[col].rank() / len(values)
     

@@ -830,6 +830,17 @@ class FactorFactory:
             return pd.DataFrame()
         
         return pd.DataFrame.from_dict(self.factor_registry, orient='index')
+    
+    def get_factor_registry(self) -> Dict:
+        """
+        获取因子注册表（字典格式）
+        
+        Returns:
+        --------
+        Dict
+            因子名 -> {family, formula, period, reference} 的映射
+        """
+        return self.factor_registry
 
 
 if __name__ == "__main__":
