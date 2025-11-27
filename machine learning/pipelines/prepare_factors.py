@@ -72,6 +72,8 @@ if ml_root not in sys.path:
 from features.factor_factory import FactorFactory
 from features.factor_library_manager import FactorLibraryManager
 from data.data_loader import DataLoader
+from data.tradability_filter import TradabilityFilter
+from data.financial_data_loader import FinancialDataLoader
 # 使用你已有的横截面评估框架！
 from evaluation.cross_section_analyzer import CrossSectionAnalyzer
 from evaluation.cross_section_metrics import calculate_forward_returns
@@ -200,6 +202,72 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     print(f"   股票数量: {features_df.index.get_level_values('ticker').nunique()}")
     print(f"   股票列表: {', '.join(features_df.index.get_level_values('ticker').unique()[:5])}..." if len(tickers) > 5 else f"   股票列表: {', '.join(tickers)}")
     
+    # 2.5 交易可行性过滤
+    print("\n" + "=" * 80)
+    print("步骤 2.5: 交易可行性过滤")
+    print("=" * 80)
+    
+    tradability_filter = TradabilityFilter(
+        min_volume=tradability_config.get('min_volume', 2000),
+        min_amount=tradability_config.get('min_amount', 10000000),
+        min_price=tradability_config.get('min_price', 1.0),
+        min_turnover=tradability_config.get('min_turnover', 0.1),
+        min_listing_days=tradability_config.get('min_listing_days', 60),
+        exclude_st=tradability_config.get('exclude_st', True),
+        exclude_limit_moves=tradability_config.get('exclude_limit_moves', False),
+        limit_threshold=tradability_config.get('limit_threshold', 0.098)
+    )
+    
+    # 生成可交易性掩码
+    tradable_mask = tradability_filter.filter(features_df)
+    tradable_ratio = tradable_mask.sum() / len(tradable_mask) * 100
+    
+    print(f"✅ 交易可行性过滤完成")
+    print(f"   总样本数: {len(tradable_mask)}")
+    print(f"   可交易样本: {tradable_mask.sum()} ({tradable_ratio:.1f}%)")
+    print(f"   被过滤样本: {(~tradable_mask).sum()} ({100-tradable_ratio:.1f}%)")
+    
+    # 2.6 加载财务数据（如果配置启用）
+    financial_features = None
+    pit_config = config['data'].get('pit', {})
+    
+    if pit_config.get('enabled', False):
+        print("\n" + "=" * 80)
+        print("步骤 2.6: 加载财务数据 (PIT对齐)")
+        print("=" * 80)
+        
+        try:
+            financial_loader = FinancialDataLoader(
+                announce_lag_days=pit_config.get('financial_lag_days', 90),
+                ffill_limit=pit_config.get('financial_ffill_limit', 95)
+            )
+            
+            financial_dfs = []
+            for ticker in tickers:
+                try:
+                    fin_df = financial_loader.load_financial_data(
+                        symbol=ticker,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    if fin_df is not None and not fin_df.empty:
+                        financial_dfs.append(fin_df)
+                except Exception as e:
+                    print(f"   ⚠️  {ticker} 财务数据加载失败: {e}")
+            
+            if financial_dfs:
+                financial_features = pd.concat(financial_dfs)
+                print(f"✅ 财务数据加载完成")
+                print(f"   财务特征数: {financial_features.shape[1]}")
+                print(f"   样本数: {len(financial_features)}")
+            else:
+                print(f"⚠️  未加载到财务数据，跳过财务因子")
+        except Exception as e:
+            print(f"⚠️  财务数据加载器初始化失败: {e}")
+            print(f"   将跳过财务因子，仅使用市场数据因子")
+    else:
+        print("\n📋 财务数据未启用 (pit.enabled=False)")
+    
     # 3. 生成因子
     print("\n" + "=" * 80)
     print("步骤 3: 生成因子")
@@ -210,6 +278,12 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     # 生成所有因子族
     print("\n🏭 生成因子...")
     all_factors_df = factory.generate_all_factors(features_df)
+    
+    # 如果有财务数据，可以生成财务因子（需要FactorFactory支持）
+    if financial_features is not None:
+        print(f"\n📊 财务数据可用，可生成财务相关因子")
+        # TODO: 在FactorFactory中添加财务因子生成方法
+        # factory.generate_financial_factors(financial_features)
     
     print(f"\n✅ 因子生成完成")
     print(f"   生成因子数: {all_factors_df.shape[1]}")
@@ -243,14 +317,15 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     )
     print(f"   ✅ 远期收益计算完成: {forward_returns_df.shape}")
     
-    # 准备可交易性mask（可选）
-    # 如果features_df中有tradable列，使用它；否则为None
-    tradable_mask = None
-    if 'tradable' in features_df.columns:
-        tradable_mask = features_df[['tradable']]
-        print(f"   ✅ 使用可交易性mask")
+    # 使用步骤2.5生成的可交易性mask
+    # tradable_mask 已经在前面的 TradabilityFilter 中生成
+    if tradable_mask is not None and tradable_mask.sum() > 0:
+        print(f"   ✅ 使用可交易性mask (可交易样本: {tradable_mask.sum()})")
+        # 转换为DataFrame格式以匹配CrossSectionAnalyzer的要求
+        tradable_mask_df = pd.DataFrame({'tradable': tradable_mask}, index=features_df.index)
     else:
-        print(f"   ⚠️  未提供可交易性mask，将使用全部样本")
+        tradable_mask_df = None
+        print(f"   ⚠️  未生成可交易性mask，将使用全部样本")
     
     # 准备市值和行业数据（用于中性化）
     market_cap = features_df[['market_cap']] if 'market_cap' in features_df.columns else None
@@ -287,7 +362,7 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
                 factors=single_factor_df,
                 forward_returns=forward_returns_df,
                 prices=prices_df if 'close' in features_df.columns else None,
-                tradable_mask=tradable_mask,
+                tradable_mask=tradable_mask_df,  # 使用步骤2.5生成的可交易性mask
                 market_cap=market_cap,
                 industry=industry
             )
