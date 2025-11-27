@@ -67,14 +67,14 @@
 
 ### 核心模块清单
 
-| 模块 | 文件 | 功能 | 代码量 |
-|------|------|------|--------|
-| 核心度量 | `cross_section_metrics.py` | Forward Returns, IC, ICIR, Spread, 换手率等 | ~600行 |
-| 因子预处理 | `factor_preprocessing.py` | Winsorize, 标准化, 中性化 | ~400行 |
-| 分析器 | `cross_section_analyzer.py` | 统一评估接口, 流程编排, **深度质量检查** | ~750行 |
-| 可视化 | `visualization.py` | 7种专业图表 | ~600行 |
-| 报告生成 | `tearsheet.py` | HTML报告, CSV导出 | ~400行 |
-| 示例脚本 | `run_cross_section_analysis.py` | 端到端示例 | ~300行 |
+| 模块 | 文件 | 功能 | 代码量 | 集成状态 |
+|------|------|------|--------|----------|
+| 核心度量 | `cross_section_metrics.py` | Forward Returns, IC, ICIR, Spread, 换手率等 (含Numba加速) | ~600行 | ✅ prepare_factors.py |
+| 因子预处理 | `factor_preprocessing.py` | Winsorize, 标准化, 中性化 | ~400行 | ✅ prepare_factors.py |
+| 分析器 | `cross_section_analyzer.py` | 统一评估接口, 流程编排, **深度质量检查** | ~750行 | ✅ prepare_factors.py |
+| 可视化 | `visualization.py` | 7种专业图表 | ~600行 | ✅ prepare_factors.py (步骤6) |
+| 报告生成 | `tearsheet.py` | HTML报告, CSV导出 | ~400行 | ✅ prepare_factors.py (步骤6) |
+| 适配器 | `cross_section_adapter.py` | train_models.py适配 | ~200行 | ⚠️ 可选集成 |
 
 **注**：v1.1 版本将质量检查功能（PSI/KS/IC衰减）整合到 `CrossSectionAnalyzer` 中，通过 `check_quality=True` 参数启用。
 
@@ -374,4 +374,4 @@ $$\text{factor} \sim \alpha + \beta_1 \log(\text{mkt\_cap}) + \beta_2 \text{indu
 
 ---
 
-*最后更新: 2024 | 文档版本: v1.0.0 | 框架版本: v1.0.0*
+*最后更新: 2025-01-27 | 文档版本: v1.1.0 | 框架版本: v1.1.0

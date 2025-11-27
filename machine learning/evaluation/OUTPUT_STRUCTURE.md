@@ -1,14 +1,15 @@
-# 横截面评估框架 - 输出文件结构文档
+﻿# 横截面评估框架 - 输出文件结构文档
 
-> 更新日期: 2025-11-19  
-> 版本: v1.0
+> 更新日期: 2025-01-27  
+> 版本: v1.1 
 
 ---
 
 ## 目录
 
 1. [输出目录概览](#输出目录概览)
-2. [文件类型说明](#文件类型说明)
+2. [与prepare_factors.py集成](#与prepare_factorspy集成)
+3. [文件类型说明](#文件类型说明)
 3. [输出文件命名规范](#输出文件命名规范)
 4. [详细文件格式](#详细文件格式)
 5. [使用示例](#使用示例)
@@ -45,42 +46,88 @@ ML output/
                 └── factor_performance_summary.csv              # 因子表现汇总
 ```
 
-### 1.2 实际示例
+### 1.2 实际示例 (prepare_factors.py输出)
 
 ```
 ML output/
-└── reports/
-    └── baseline_v1/
-        └── factors/
-            ├── momentum_20d/
-            │   ├── tearsheet_momentum_20d_ret_5d.html
-            │   ├── tearsheet_momentum_20d_ret_10d.html
-            │   ├── ic_momentum_20d_ret_5d.csv
-            │   ├── quantile_returns_momentum_20d_ret_5d.csv
-            │   ├── ic_series_momentum_20d_ret_5d.png
-            │   ├── ic_dist_momentum_20d_ret_5d.png
-            │   ├── quantile_cumret_momentum_20d_ret_5d.png
-            │   ├── quantile_meanret_momentum_20d_ret_5d.png
-            │   ├── spread_cumret_momentum_20d_ret_5d.png
-            │   ├── ic_heatmap_momentum_20d_ret_5d.png
-            │   └── turnover_momentum_20d.png
-            │
-            ├── pe_ratio/
-            │   ├── tearsheet_pe_ratio_ret_5d.html
-            │   ├── ic_pe_ratio_ret_5d.csv
-            │   └── ... (同上)
-            │
-            └── roe/
-                ├── tearsheet_roe_ret_5d.html
-                ├── ic_roe_ret_5d.csv
-                └── ... (同上)
+├── snapshots/ds_2025Q4_v1/                         # 数据快照 ✨新增
+│   ├── 000001_000002_etc10_data.parquet            # Parquet格式数据
+│   ├── metadata.json                               # 快照元数据
+│   └── reports/data_quality/
+│       └── ds_2025Q4_v1.json                       # 数据质量报告
+│
+├── figures/baseline_v1/factors/                    # 可视化图表 ✨新增
+│   ├── momentum_20d/
+│   │   ├── ic_series_momentum_20d_ret_5d.png       # IC走廊图
+│   │   ├── ic_dist_momentum_20d_ret_5d.png         # IC分布图
+│   │   ├── ic_heatmap_momentum_20d_ret_5d.png      # 月度IC热力图
+│   │   ├── quantile_cumret_momentum_20d_ret_5d.png # 分位数累计收益
+│   │   ├── quantile_meanret_momentum_20d_ret_5d.png # 分位数平均收益
+│   │   └── spread_cumret_momentum_20d_ret_5d.png   # Spread累计收益
+│   └── pe_ratio/
+│       └── ... (同上)
+│
+└── reports/baseline_v1/factors/
+    ├── tearsheet_momentum_20d_ret_5d.html          # HTML报告
+    ├── ic_momentum_20d_ret_5d.csv                  # IC数据
+    ├── quantile_returns_momentum_20d_ret_5d.csv    # 分位数收益
+    └── ... (其他因子)
 ```
 
 ---
 
-## 2. 文件类型说明
+## 2. 与prepare_factors.py集成
 
-### 2.1 HTML报告 (Tearsheet)
+### 2.1 集成流程
+
+`prepare_factors.py` 步骤6会自动生成所有可视化图表和报告：
+
+```python
+# 步骤6: 生成Tearsheet报告 + 可视化图表
+from evaluation.visualization import (
+    plot_ic_time_series,
+    plot_ic_distribution,
+    plot_quantile_cumulative_returns,
+    plot_quantile_mean_returns,
+    plot_spread_cumulative_returns,
+    plot_monthly_ic_heatmap
+)
+from evaluation.tearsheet import generate_html_tearsheet
+
+# 为每个通过的因子生成图表
+for factor_name in qualified_factors:
+    factor_figures_dir = f"ML output/figures/baseline_v1/factors/{factor_name}"
+    
+    # 生成6种图表
+    plot_ic_time_series(ic_series, save_path=f"{factor_figures_dir}/ic_series_{factor_name}_5d.png")
+    plot_ic_distribution(ic_series, save_path=f"{factor_figures_dir}/ic_dist_{factor_name}_5d.png")
+    plot_monthly_ic_heatmap(ic_series, save_path=f"{factor_figures_dir}/ic_heatmap_{factor_name}_5d.png")
+    plot_quantile_cumulative_returns(cum_rets, save_path=f"{factor_figures_dir}/quantile_cumret_{factor_name}_5d.png")
+    plot_quantile_mean_returns(q_rets, save_path=f"{factor_figures_dir}/quantile_meanret_{factor_name}_5d.png")
+    plot_spread_cumulative_returns(spread, save_path=f"{factor_figures_dir}/spread_cumret_{factor_name}_5d.png")
+    
+    # 生成HTML报告（包含图表路径）
+    generate_html_tearsheet(results, factor_name, 'ret_5d', output_path, plot_paths)
+```
+
+### 2.2 配置控制
+
+在 `configs/ml_baseline.yml` 中可配置快照和图表生成：
+
+```yaml
+# 数据快照配置
+snapshot:
+  enabled: true           # 启用数据快照
+  save_parquet: true      # 保存为Parquet格式
+
+# 图表输出由prepare_factors.py步骤6自动处理
+```
+
+---
+
+## 3. 文件类型说明
+
+### 3.1 HTML报告 (Tearsheet)
 
 **文件名格式**: `tearsheet_{factor_name}_{period}.html`
 
@@ -96,7 +143,7 @@ ML output/
 - 图文并茂，易于理解
 - 可独立分享
 
-### 2.2 CSV数据文件
+### 3.2 CSV数据文件
 
 #### IC时间序列 (ic_*.csv)
 
@@ -127,7 +174,7 @@ date,Q1,Q2,Q3,Q4,Q5
 ...
 ```
 
-### 2.3 PNG图表文件
+### 3.3 PNG图表文件
 
 所有图表统一使用**300 DPI**高清输出，适合论文和报告使用。
 
@@ -145,9 +192,9 @@ date,Q1,Q2,Q3,Q4,Q5
 
 ---
 
-## 3. 输出文件命名规范
+## 4. 输出文件命名规范
 
-### 3.1 因子名称规范
+### 4.1 因子名称规范
 
 **规则**: 
 - 使用小写字母+下划线
@@ -161,7 +208,7 @@ date,Q1,Q2,Q3,Q4,Q5
 - ❌ `Momentum-20D`
 - ❌ `P/E Ratio`
 
-### 3.2 收益期命名规范
+### 4.2 收益期命名规范
 
 **格式**: `ret_{N}d` 或 `ret_{N}w`
 
@@ -172,7 +219,7 @@ date,Q1,Q2,Q3,Q4,Q5
 - `ret_20d` - 20日收益率
 - `ret_1w` - 1周收益率
 
-### 3.3 完整文件名示例
+### 4.3 完整文件名示例
 
 ```
 tearsheet_momentum_20d_ret_5d.html
@@ -183,9 +230,9 @@ turnover_value_factor.png
 
 ---
 
-## 4. 详细文件格式
+## 5. 详细文件格式
 
-### 4.1 HTML报告详细结构
+### 5.1 HTML报告详细结构
 
 ```html
 <!DOCTYPE html>
@@ -304,7 +351,7 @@ turnover_value_factor.png
 </html>
 ```
 
-### 4.2 IC CSV格式详解
+### 5.2 IC CSV格式详解
 
 **文件**: `ic_{factor_name}_{period}.csv`
 
@@ -333,7 +380,7 @@ date,ic
 - 包含所有交易日
 - 缺失日期表示该日无有效数据
 
-### 4.3 分位数收益CSV格式详解
+### 5.3 分位数收益CSV格式详解
 
 **文件**: `quantile_returns_{factor_name}_{period}.csv`
 
@@ -366,7 +413,7 @@ date,Q1,Q2,Q3,Q4,Q5,Q6,Q7,Q8,Q9,Q10
 - 收益率为小数格式（0.0025 = 0.25%）
 - 按日期升序排列
 
-### 4.4 图表文件规格
+### 5.4 图表文件规格
 
 **通用规格**:
 - 格式: PNG
@@ -388,9 +435,9 @@ date,Q1,Q2,Q3,Q4,Q5,Q6,Q7,Q8,Q9,Q10
 
 ---
 
-## 5. 使用示例
+## 6. 使用示例
 
-### 5.1 生成单个因子完整报告
+### 6.1 生成单个因子完整报告
 
 ```python
 from evaluation import CrossSectionAnalyzer
@@ -447,7 +494,7 @@ ML output/reports/baseline_v1/factors/momentum_20d/
 └── turnover_momentum_20d.png
 ```
 
-### 5.2 批量生成多因子报告
+### 6.2 批量生成多因子报告
 
 ```python
 from evaluation import CrossSectionAnalyzer
@@ -502,7 +549,7 @@ for factor_name in factor_names:
         )
 ```
 
-### 5.3 读取已生成的数据
+### 6.3 读取已生成的数据
 
 ```python
 import pandas as pd
@@ -532,9 +579,9 @@ print(f"Spread: {(quantile_rets['Q5'] - quantile_rets['Q1']).mean():.4f}")
 
 ---
 
-## 6. 输出管理最佳实践
+## 7. 输出管理最佳实践
 
-### 6.1 版本管理
+### 7.1 版本管理
 
 **建议**: 使用版本号区分不同实验
 
@@ -546,7 +593,7 @@ ML output/reports/
 └── production_v1/        # 生产环境版本
 ```
 
-### 6.2 文件清理
+### 7.2 文件清理
 
 **定期清理策略**:
 - 保留最近3个版本的完整输出
@@ -576,7 +623,7 @@ def cleanup_old_outputs(reports_dir, keep_versions=3):
                     os.remove(os.path.join(root, file))
 ```
 
-### 6.3 输出验证
+### 7.3 输出验证
 
 **生成后检查清单**:
 - [ ] HTML文件可正常打开
@@ -587,7 +634,7 @@ def cleanup_old_outputs(reports_dir, keep_versions=3):
 
 ---
 
-## 7. 故障排查
+## 8. 故障排查
 
 ### Q1: HTML报告打不开或显示异常？
 
@@ -638,7 +685,7 @@ fig.savefig('plot.png', dpi=300, bbox_inches='tight')
 
 ---
 
-## 8. 常见问题
+## 9. 常见问题
 
 ### Q1: 为什么需要多个收益期的报告？
 
@@ -673,9 +720,18 @@ fig.savefig('plot.png', dpi=300, bbox_inches='tight')
 
 ---
 
-## 9. 更新日志
+## 10. 更新日志
 
-### v1.0 (2025-11-19)
+### v1.1 (2025-01-27)
+
+**集成到prepare_factors.py**:
+- ✅ 新增 `snapshots/` 数据快照目录结构
+- ✅ 新增 `figures/{factor}/` 可视化图表目录
+- ✅ 添加与prepare_factors.py集成说明（步骤6自动生成）
+- ✅ 更新实际输出示例
+- ✅ 添加配置控制说明
+
+### v1.0 (2025-01-27)
 
 **初始版本**:
 - ✅ 定义标准输出目录结构
@@ -715,5 +771,6 @@ fig.savefig('plot.png', dpi=300, bbox_inches='tight')
 ---
 
 **文档维护者:** AI Assistant  
-**最后更新:** 2025-11-19  
-**版本:** v1.0
+**最后更新:** 2025-01-27  
+**版本:** v1.1
+

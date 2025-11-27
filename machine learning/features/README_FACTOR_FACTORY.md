@@ -20,13 +20,15 @@
 └─────────────────────────────────────────────────────────────┘
 
 1️⃣  数据加载层
-    └─ data_loader.py (已有)
-         ├─ InfluxDB市场数据
-         ├─ PIT对齐
-         └─ 可交易性过滤
+    ├─ data/market_data_loader.py
+    │     ├─ InfluxDB市场数据
+    │     └─ 可交易性过滤
+    ├─ data/tradability_filter.py (7层过滤)
+    ├─ data/financial_data_loader.py (PIT对齐)
+    └─ data/data_snapshot.py (数据快照) ✨已集成
 
 2️⃣  因子生成层
-    └─ factor_factory.py (新)
+    └─ features/factor_factory.py (新)
          ├─ 动量/反转族 (12个因子)
          ├─ 波动率族 (8个因子)
          ├─ 量价微观结构族 (9个因子)
@@ -35,7 +37,7 @@
 
 3️⃣  质量检查层（集成到CrossSectionAnalyzer）
     └─ evaluation/cross_section_analyzer.py
-         ├─ IC/ICIR检查
+         ├─ IC/ICIR检查 (Numba加速)
          ├─ IC衰减分析（check_quality=True时启用）
          ├─ PSI/KS分布检查（check_quality=True时启用）
          ├─ 相关性检查
@@ -45,14 +47,24 @@
          └─ 换手率统计
 
 4️⃣  因子库管理层
-    └─ factor_library_manager.py (新)
+    └─ features/factor_library_manager.py (新)
          ├─ 因子清单 (final_feature_list.txt)
          ├─ 元数据管理 (factor_metadata.json)
          ├─ 质量历史 (quality_history.csv)
          └─ 版本控制
 
-5️⃣  Pipeline集成层
-    └─ prepare_factors.py (新)
+5️⃣  报告输出层 ✨已集成
+    ├─ evaluation/tearsheet.py (HTML报告)
+    └─ evaluation/visualization.py (6种图表)
+         ├─ IC时间序列图
+         ├─ IC分布图
+         ├─ 月度IC热力图
+         ├─ 分位数累计收益图
+         ├─ 分位数平均收益图
+         └─ Spread累计收益图
+
+6️⃣  Pipeline集成层
+    └─ pipelines/prepare_factors.py (新)
          └─ 端到端流程编排
 ```
 
@@ -67,12 +79,18 @@ machine learning/
 │   ├── factor_library_manager.py      # 库管理器（490行）
 │   └── test_factor_system.py          # 系统测试（260行）
 │
+├── data/
+│   ├── market_data_loader.py          # 市场数据加载器
+│   ├── tradability_filter.py          # 7层交易可行性过滤
+│   ├── financial_data_loader.py       # PIT对齐财务数据
+│   └── data_snapshot.py               # 数据快照管理器 ✨已集成
+│
 ├── evaluation/
 │   ├── cross_section_analyzer.py      # 横截面分析器（含质量检查）（750行）
-│   ├── cross_section_metrics.py       # 核心度量计算（600行）
+│   ├── cross_section_metrics.py       # 核心度量计算 (Numba加速)（600行）
 │   ├── factor_preprocessing.py        # 因子预处理（400行）
 │   ├── tearsheet.py                   # 报告生成（400行）
-│   └── visualization.py               # 图表生成（600行）
+│   └── visualization.py               # 图表生成 (6种) ✨已集成（600行）
 │
 ├── pipelines/
 │   └── prepare_factors.py             # 因子准备流程（330行）
@@ -81,6 +99,10 @@ machine learning/
 │   └── ml_baseline.yml                # 配置文件（已更新）
 │
 └── ML output/
+    ├── snapshots/{snapshot_id}/       # ✨新增: 数据快照
+    │   ├── {symbols}_data.parquet
+    │   ├── metadata.json
+    │   └── reports/data_quality/
     ├── artifacts/baseline_v1/
     │   ├── final_feature_list.txt      # 因子清单
     │   ├── factor_metadata.json        # 因子元数据
@@ -89,7 +111,19 @@ machine learning/
     ├── datasets/baseline_v1/
     │   └── qualified_factors_*.parquet # 合格因子数据
     │
+    ├── figures/baseline_v1/factors/   # ✨新增: 可视化图表
+    │   └── {factor}/
+    │       ├── ic_series_{factor}_5d.png
+    │       ├── ic_dist_{factor}_5d.png
+    │       ├── ic_heatmap_{factor}_5d.png
+    │       ├── quantile_cumret_{factor}_5d.png
+    │       ├── quantile_meanret_{factor}_5d.png
+    │       └── spread_cumret_{factor}_5d.png
+    │
     └── reports/baseline_v1/factors/
+        ├── tearsheet_{factor}_5d.html  # HTML报告
+        ├── ic_{factor}_5d.csv          # IC数据
+        ├── quantile_returns_{factor}_5d.csv
         ├── factor_report_*.csv         # 因子报告
         └── family_performance.csv      # 族别表现
 ```
@@ -549,4 +583,4 @@ roc_20d,2025-01-20T10:30:00,0.048,1.23,0.15,8.5,True
 
 ---
 
-*最后更新: 2025-01-20*
+*最后更新: 2025-01-27 (集成数据快照 + 可视化图表)*

@@ -10,17 +10,21 @@
 prepare_factors.py (主流程)
 ├── data.MarketDataLoader        # 步骤1-2: 批量加载多股票数据
 │   └── load_market_data_batch() #   返回MultiIndex[date, ticker]
+├── data.TradabilityFilter       # 步骤2.5: 7层交易可行性过滤
+├── data.FinancialDataLoader     # 步骤2.6: PIT对齐财务数据 (可选)
+├── data.DataSnapshot            # 步骤2.7: 数据快照管理 ✨新增
 ├── features.FactorFactory       # 步骤3: 生成因子
 ├── evaluation (横截面评估框架)   # 步骤4: 因子质量检查 ⭐核心
 │   ├── CrossSectionAnalyzer     #   - 统一评估接口 + 深度质量检查
 │   │                             #     * 标准分析: IC/ICIR/Spread/单调性/换手率
 │   │                             #     * 深度检查: IC衰减/PSI/KS (check_quality=True)
-│   ├── cross_section_metrics    #   - IC/ICIR/Spread/单调性/换手率计算
+│   ├── cross_section_metrics    #   - IC/ICIR/Spread/单调性/换手率计算 (Numba加速)
 │   ├── factor_preprocessing     #   - Winsorize/标准化/中性化
-│   ├── tearsheet                #   - HTML报告生成
-│   └── visualization            #   - 图表生成
+│   ├── visualization            #   - 6种图表生成 ✨已集成
+│   └── tearsheet                #   - HTML报告生成
 ├── features.FactorLibraryManager # 步骤5: 因子入库
-└── 报告输出                      # 步骤6: Tearsheet报告
+└── 报告输出                      # 步骤6: Tearsheet报告 + 可视化图表
+```
 ```
 
 ### 模块功能说明
@@ -201,18 +205,24 @@ for factor_name in qualified_factors:
 **产出文件结构:**
 ```
 ML output/
+├── snapshots/{snapshot_id}/                  # ✨新增: 数据快照
+│   ├── {symbols}_data.parquet               # Parquet格式快照
+│   ├── metadata.json                        # 快照元数据
+│   └── reports/data_quality/
+│       └── {snapshot_id}.json               # 数据质量报告
 ├── reports/baseline_v1/factors/
 │   ├── tearsheet_ROC_20_5d.html          ⭐ HTML综合报告
 │   ├── ic_ROC_20_5d.csv                  📊 IC时间序列
 │   ├── quantile_returns_ROC_20_5d.csv    📊 分位数收益
 │   ├── tearsheet_RealizedVol_60_5d.html
 │   └── ...
-├── figures/baseline_v1/factors/
-│   ├── ic_series_ROC_20_5d.png           📈 IC走廊图
-│   ├── ic_dist_ROC_20_5d.png             📈 IC分布图
-│   ├── quantile_cumret_ROC_20_5d.png     📈 累计收益曲线
-│   ├── spread_cumret_ROC_20_5d.png       📈 Spread收益
-│   └── ...
+├── figures/baseline_v1/factors/{factor}/    # ✨新增: 可视化图表
+│   ├── ic_series_{factor}_5d.png           📈 IC走廊图
+│   ├── ic_dist_{factor}_5d.png             📈 IC分布图
+│   ├── ic_heatmap_{factor}_5d.png          📈 月度IC热力图
+│   ├── quantile_cumret_{factor}_5d.png     📈 累计收益曲线
+│   ├── quantile_meanret_{factor}_5d.png    📈 平均收益柱状图
+│   └── spread_cumret_{factor}_5d.png       📈 Spread收益
 └── datasets/baseline_v1/
     ├── qualified_factors_20250119.parquet  💾 通过的因子数据
     ├── qualified_factors_20250119.csv
@@ -335,5 +345,5 @@ python prepare_factors.py --tickers 000001.SZ,000002.SZ,600000.SH
 ---
 
 **作者**: HaOooMi  
-**版本**: v1.0  
-**更新**: 2025-01-19
+**版本**: v1.1 (集成数据快照 + 可视化图表)  
+**更新**: 2025-01-27

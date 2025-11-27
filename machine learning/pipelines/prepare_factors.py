@@ -74,11 +74,22 @@ from features.factor_library_manager import FactorLibraryManager
 from data.data_loader import DataLoader
 from data.tradability_filter import TradabilityFilter
 from data.financial_data_loader import FinancialDataLoader
+from data.data_snapshot import DataSnapshot  # 数据快照管理
 # 使用你已有的横截面评估框架！
 from evaluation.cross_section_analyzer import CrossSectionAnalyzer
 from evaluation.cross_section_metrics import calculate_forward_returns
 from evaluation.factor_preprocessing import preprocess_factor_pipeline
 from evaluation.tearsheet import generate_html_tearsheet
+from evaluation.visualization import (  # 图表生成
+    plot_ic_time_series,
+    plot_ic_distribution,
+    plot_quantile_cumulative_returns,
+    plot_quantile_mean_returns,
+    plot_spread_cumulative_returns,
+    plot_monthly_ic_heatmap,
+    plot_turnover_time_series,
+    create_factor_tearsheet_plots
+)
 
 
 def load_config(config_path: str = "configs/ml_baseline.yml") -> dict:
@@ -267,6 +278,53 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             print(f"   将跳过财务因子，仅使用市场数据因子")
     else:
         print("\n📋 财务数据未启用 (pit.enabled=False)")
+    
+    # 2.7 创建数据快照（数据版本管理）
+    snapshot_config = config.get('snapshot', {})
+    snapshot_manager = None
+    
+    if snapshot_config.get('enabled', True):  # 默认启用
+        print("\n" + "=" * 80)
+        print("步骤 2.7: 创建数据快照")
+        print("=" * 80)
+        
+        try:
+            snapshot_manager = DataSnapshot(
+                output_dir=os.path.join(ml_root, "ML output"),
+                snapshot_id=None  # 自动生成
+            )
+            
+            # 准备快照数据（市场数据 + 可交易性mask）
+            snapshot_data = features_df.copy()
+            snapshot_data['tradable_flag'] = tradable_mask.astype(int)
+            
+            # 创建快照
+            filters_info = {
+                'min_volume': tradability_config.get('min_volume', 2000),
+                'min_amount': tradability_config.get('min_amount', 10000000),
+                'min_price': tradability_config.get('min_price', 1.0),
+                'exclude_st': tradability_config.get('exclude_st', True),
+                'tradable_ratio': float(tradable_ratio)
+            }
+            
+            snapshot_path = snapshot_manager.create_snapshot(
+                data=snapshot_data,
+                symbol='_'.join(tickers[:3]) + (f'_etc{len(tickers)}' if len(tickers) > 3 else ''),
+                start_date=start_date,
+                end_date=end_date,
+                filters=filters_info,
+                random_seed=42,
+                save_parquet=True
+            )
+            
+            print(f"✅ 数据快照创建完成")
+            print(f"   快照ID: {snapshot_manager.snapshot_id}")
+            print(f"   快照路径: {snapshot_path}")
+        except Exception as e:
+            print(f"⚠️  数据快照创建失败: {e}")
+            print(f"   将继续执行，但不会保存快照")
+    else:
+        print("\n📋 数据快照未启用 (snapshot.enabled=False)")
     
     # 3. 生成因子
     print("\n" + "=" * 80)
@@ -511,7 +569,7 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     
     # 6. 生成完整报告（使用你的tearsheet！）
     print("\n" + "=" * 80)
-    print("步骤 6: 生成Tearsheet报告")
+    print("步骤 6: 生成Tearsheet报告 + 可视化图表")
     print("=" * 80)
     
     # 为每个通过的因子生成完整的tearsheet报告
@@ -520,7 +578,7 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     os.makedirs(reports_dir, exist_ok=True)
     os.makedirs(figures_dir, exist_ok=True)
     
-    print(f"\n📝 生成 {len(qualified_factors)} 个因子的详细报告...\n")
+    print(f"\n📝 生成 {len(qualified_factors)} 个因子的详细报告 + 图表...\n")
     
     for i, factor_name in enumerate(qualified_factors, 1):
         print(f"[{i}/{len(qualified_factors)}] 生成报告: {factor_name}")
@@ -529,32 +587,176 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             report = quality_reports[factor_name]
             full_results = report['full_results']
             
-            # 生成HTML tearsheet（使用你的evaluation模块！）
+            # ===== 6.1 生成可视化图表 =====
+            factor_figures_dir = os.path.join(figures_dir, factor_name)
+            os.makedirs(factor_figures_dir, exist_ok=True)
+            
+            plot_paths = {}
+            
+            # 准备IC序列数据
+            key_5d = (factor_name, 'ret_5d')
+            
+            # 1. IC时间序列图
+            if 'daily_ic' in full_results:
+                daily_ic = full_results['daily_ic']
+                if key_5d in daily_ic.columns:
+                    ic_series = daily_ic[key_5d]
+                elif isinstance(daily_ic, pd.DataFrame) and 5 in daily_ic.columns:
+                    ic_series = daily_ic[5]
+                elif isinstance(daily_ic, dict) and 5 in daily_ic:
+                    ic_series = daily_ic[5]
+                else:
+                    ic_series = None
+                
+                if ic_series is not None and len(ic_series) > 0:
+                    try:
+                        ic_path = os.path.join(factor_figures_dir, f"ic_series_{factor_name}_5d.png")
+                        plot_ic_time_series(
+                            ic_series,
+                            title=f"IC Time Series: {factor_name} @ 5d",
+                            save_path=ic_path
+                        )
+                        plot_paths['ic_series'] = ic_path
+                    except Exception as e:
+                        print(f"      ⚠️  IC时间序列图生成失败: {e}")
+                    
+                    # 2. IC分布图
+                    try:
+                        ic_dist_path = os.path.join(factor_figures_dir, f"ic_dist_{factor_name}_5d.png")
+                        plot_ic_distribution(
+                            ic_series,
+                            title=f"IC Distribution: {factor_name} @ 5d",
+                            save_path=ic_dist_path
+                        )
+                        plot_paths['ic_distribution'] = ic_dist_path
+                    except Exception as e:
+                        print(f"      ⚠️  IC分布图生成失败: {e}")
+                    
+                    # 3. 月度IC热力图
+                    try:
+                        ic_heatmap_path = os.path.join(factor_figures_dir, f"ic_heatmap_{factor_name}_5d.png")
+                        plot_monthly_ic_heatmap(
+                            ic_series,
+                            title=f"Monthly IC Heatmap: {factor_name} @ 5d",
+                            save_path=ic_heatmap_path
+                        )
+                        plot_paths['ic_heatmap'] = ic_heatmap_path
+                    except Exception as e:
+                        print(f"      ⚠️  月度IC热力图生成失败: {e}")
+            
+            # 4. 分位数累计收益图
+            if 'cumulative_returns' in full_results:
+                cum_rets = full_results['cumulative_returns']
+                if key_5d in cum_rets:
+                    cum_ret_data = cum_rets[key_5d]
+                elif 5 in cum_rets:
+                    cum_ret_data = cum_rets[5]
+                else:
+                    cum_ret_data = None
+                
+                if cum_ret_data is not None and len(cum_ret_data) > 0:
+                    try:
+                        cum_path = os.path.join(factor_figures_dir, f"quantile_cumret_{factor_name}_5d.png")
+                        plot_quantile_cumulative_returns(
+                            cum_ret_data,
+                            title=f"Quantile Cumulative Returns: {factor_name} @ 5d",
+                            save_path=cum_path
+                        )
+                        plot_paths['cumulative_returns'] = cum_path
+                    except Exception as e:
+                        print(f"      ⚠️  分位数累计收益图生成失败: {e}")
+            
+            # 5. 分位数平均收益柱状图
+            if 'quantile_returns' in full_results:
+                q_rets = full_results['quantile_returns']
+                if key_5d in q_rets:
+                    q_ret_data = q_rets[key_5d]
+                elif 5 in q_rets:
+                    q_ret_data = q_rets[5]
+                else:
+                    q_ret_data = None
+                
+                if q_ret_data is not None and len(q_ret_data) > 0:
+                    try:
+                        mean_ret_path = os.path.join(factor_figures_dir, f"quantile_meanret_{factor_name}_5d.png")
+                        plot_quantile_mean_returns(
+                            q_ret_data,
+                            title=f"Quantile Mean Returns: {factor_name} @ 5d",
+                            save_path=mean_ret_path
+                        )
+                        plot_paths['mean_returns'] = mean_ret_path
+                    except Exception as e:
+                        print(f"      ⚠️  分位数平均收益图生成失败: {e}")
+            
+            # 6. Spread累计收益图
+            if 'spreads' in full_results:
+                spreads = full_results['spreads']
+                if key_5d in spreads:
+                    spread_data = spreads[key_5d]
+                elif 5 in spreads:
+                    spread_data = spreads[5]
+                else:
+                    spread_data = None
+                
+                if spread_data is not None and len(spread_data) > 0:
+                    try:
+                        spread_path = os.path.join(factor_figures_dir, f"spread_cumret_{factor_name}_5d.png")
+                        plot_spread_cumulative_returns(
+                            spread_data,
+                            title=f"Spread Cumulative Returns: {factor_name} @ 5d",
+                            save_path=spread_path
+                        )
+                        plot_paths['spread_cumulative'] = spread_path
+                    except Exception as e:
+                        print(f"      ⚠️  Spread累计收益图生成失败: {e}")
+            
+            print(f"      📊 生成 {len(plot_paths)} 个图表")
+            
+            # ===== 6.2 生成HTML Tearsheet =====
             tearsheet_path = os.path.join(reports_dir, f"tearsheet_{factor_name}_5d.html")
             
-            # 使用正确的tearsheet函数
-            from evaluation.tearsheet import generate_html_tearsheet
             generate_html_tearsheet(
                 analyzer_results=full_results,
                 factor_name=factor_name,
                 return_period='ret_5d',
                 output_path=tearsheet_path,
-                plot_paths=None  # 图表会自动生成在figures目录
+                plot_paths=plot_paths  # 传入图表路径
             )
             
+            # ===== 6.3 保存CSV数据 =====
             # 保存IC时间序列CSV
-            ic_series_path = os.path.join(reports_dir, f"ic_{factor_name}_5d.csv")
-            full_results['ic_series'][5].to_csv(ic_series_path)
+            try:
+                if 'ic_series' in full_results and 5 in full_results['ic_series']:
+                    ic_series_path = os.path.join(reports_dir, f"ic_{factor_name}_5d.csv")
+                    full_results['ic_series'][5].to_csv(ic_series_path)
+                elif 'daily_ic' in full_results:
+                    ic_series_path = os.path.join(reports_dir, f"ic_{factor_name}_5d.csv")
+                    if key_5d in full_results['daily_ic'].columns:
+                        full_results['daily_ic'][key_5d].to_csv(ic_series_path, header=['ic'])
+            except Exception as e:
+                print(f"      ⚠️  IC CSV保存失败: {e}")
             
             # 保存分位数收益CSV
-            quantile_returns_path = os.path.join(reports_dir, f"quantile_returns_{factor_name}_5d.csv")
-            full_results['quantile_returns'][5].to_csv(quantile_returns_path)
+            try:
+                if 'quantile_returns' in full_results:
+                    q_rets = full_results['quantile_returns']
+                    if key_5d in q_rets:
+                        quantile_returns_path = os.path.join(reports_dir, f"quantile_returns_{factor_name}_5d.csv")
+                        q_rets[key_5d].to_csv(quantile_returns_path)
+                    elif 5 in q_rets:
+                        quantile_returns_path = os.path.join(reports_dir, f"quantile_returns_{factor_name}_5d.csv")
+                        q_rets[5].to_csv(quantile_returns_path)
+            except Exception as e:
+                print(f"      ⚠️  分位数收益CSV保存失败: {e}")
             
             print(f"   ✅ 报告生成完成")
             print(f"      HTML: {tearsheet_path}")
+            print(f"      图表目录: {factor_figures_dir}")
         
         except Exception as e:
             print(f"   ⚠️  报告生成失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
         print()
     
