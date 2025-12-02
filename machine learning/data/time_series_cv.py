@@ -24,7 +24,7 @@
            边界后embargo日     边界后embargo日
 
 创建: 2025-12-02 | 版本: v1.0
-作者: AI Assistant
+
 """
 
 import os

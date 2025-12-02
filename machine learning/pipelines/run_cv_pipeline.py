@@ -206,6 +206,15 @@ def run_walk_forward_cv(config: dict,
             if oos_ic_test is not None:
                 all_oos_ic.append(oos_ic_test)
             
+            # 收集 OOS Spread 结果
+            oos_spread = valid_analyzer.results.get('spreads', None)
+            if oos_spread is not None:
+                all_oos_spread.append(oos_spread)
+            
+            oos_spread_test = test_analyzer.results.get('spreads', None)
+            if oos_spread_test is not None:
+                all_oos_spread.append(oos_spread_test)
+            
             fold_results = {
                 'fold': fold + 1,
                 'train_samples': len(train_idx),
@@ -244,6 +253,24 @@ def run_walk_forward_cv(config: dict,
             print(f"      Mean IC: {summary['mean']:.4f}")
             print(f"      ICIR: {summary['icir']:.4f}")
             print(f"      ICIR(年化): {summary['icir_annual']:.4f}")
+    
+    # 合并 OOS Spread 结果
+    if all_oos_spread:
+        # spreads 是字典 {(factor, period): Series}，需要按 key 合并
+        combined_spread_stats = {}
+        for spread_dict in all_oos_spread:
+            for key, spread_series in spread_dict.items():
+                if key not in combined_spread_stats:
+                    combined_spread_stats[key] = []
+                combined_spread_stats[key].append(spread_series)
+        
+        print(f"\n📊 合并 OOS Spread 统计:")
+        for key, series_list in list(combined_spread_stats.items())[:3]:
+            combined = pd.concat(series_list)
+            mean_spread = combined.mean()
+            std_spread = combined.std()
+            sharpe = mean_spread / std_spread if std_spread != 0 else 0
+            print(f"   {key}: Mean={mean_spread:.4f}, Std={std_spread:.4f}, Sharpe={sharpe:.4f}")
     
     # 保存 WFA 结果
     wfa_results = {
