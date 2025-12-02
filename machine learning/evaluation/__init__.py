@@ -51,6 +51,10 @@ from .tearsheet import (
     save_ic_to_csv,
     save_quantile_returns_to_csv
 )
+from .drift_detector import (
+    DriftDetector,
+    compare_splits_with_analyzer
+)
 
 __all__ = [
     # 传统模块
@@ -95,5 +99,9 @@ __all__ = [
     'generate_html_tearsheet',
     'generate_full_tearsheet',
     'save_ic_to_csv',
-    'save_quantile_returns_to_csv'
+    'save_quantile_returns_to_csv',
+    
+    # 漂移检测
+    'DriftDetector',
+    'compare_splits_with_analyzer'
 ]

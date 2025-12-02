@@ -178,6 +178,9 @@ target:
   # 目标处理
   clip_quantile: [0.01, 0.99]  # 裁剪极端目标值
   
+  # 标签变换（可选）
+  transform: "none"          # 标签变换：'none', 'residual_vs_index', 'residual_vs_industry', 'rank'
+  
 # ===================== 数据切分配置 =====================
 split:
   # 时间切分
@@ -185,9 +188,21 @@ split:
   valid_ratio: 0.2           # 验证集比例
   test_ratio: 0.2            # 测试集比例
   
-  # 防泄漏设置
-  purge_days: 10             # 在切分点前后清除的天数
-  embargo_days: 5            # 禁止期天数
+  # 防泄漏设置（Purged + Embargo）
+  purge_days: 10             # 在切分点前剔除的天数（≥ max(target_horizon)）
+  embargo_days: 5            # 禁止期天数（建议 target_horizon / 2）
+  
+  # 交叉验证模式
+  cv_mode: "single_split"    # 模式：'single_split' 或 'walk_forward'
+  
+  # Walk-Forward 验证（当 cv_mode = 'walk_forward' 时生效）
+  walk_forward:
+    n_splits: 5              # 折数
+    min_train_days: 252      # 最小训练日数（约1年）
+    expanding: true          # 扩张窗口（true）vs 滚动窗口（false）
+  
+  # 漂移检测阈值
+  drift_threshold: 0.2       # Valid vs Test 差异阈值（20%）
   
 # ===================== 模型配置 =====================
 models:
