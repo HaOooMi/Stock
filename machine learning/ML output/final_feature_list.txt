@@ -1,0 +1,9 @@
+# 因子工厂 v1 - 合格因子清单
+# 生成时间: 2025-12-02 09:54:26
+# 数据区间: 2018-01-01 ~ 2024-12-31
+# 通过因子数: 4
+
+turnover_mean_5d	IC=-0.0333	ICIR=-3.24	Spread=nan
+turnover_roc_5d	IC=-0.0644	ICIR=-5.30	Spread=nan
+turnover_roc_20d	IC=-0.0590	ICIR=-5.23	Spread=nan
+hl_range_mean_5d	IC=-0.0390	ICIR=-3.61	Spread=nan

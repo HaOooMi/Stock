@@ -1,0 +1,67 @@
+{
+  "snapshot_id": "ds_2025Q4_v2",
+  "created_at": "2025-12-02T09:50:16.394449",
+  "version": "1.0",
+  "data_sources": [],
+  "filters": {
+    "min_volume": 2000,
+    "min_amount": 10000000,
+    "min_price": 1.0,
+    "exclude_st": true,
+    "tradable_ratio": 97.08780952629587
+  },
+  "quality_checks": {
+    "timestamp": "2025-12-02T09:50:16.398034",
+    "total_samples": 76609,
+    "checks": {
+      "missing_ratio": {
+        "max": 0.0,
+        "mean": 0.0,
+        "columns_with_missing": {},
+        "red_flag": false
+      },
+      "extreme_values": {
+        "max": 0.020023756999830306,
+        "mean": 0.014173082983536062
+      },
+      "duplicates": {
+        "count": 0,
+        "ratio": 0.0,
+        "red_flag": false
+      },
+      "tradable_samples": {
+        "count": 74378,
+        "ratio": 0.9708780952629587,
+        "red_flag": false
+      },
+      "suspended": {
+        "count": 0,
+        "ratio": 0.0
+      },
+      "limit_moves": {
+        "limit_up": 35692,
+        "limit_down": 37294,
+        "total": 72986,
+        "ratio": 0.9527079063817567
+      },
+      "time_continuity": {
+        "n_dates": 1698,
+        "max_gap_days": 11,
+        "date_range": "2018-01-02 ~ 2024-12-30",
+        "red_flag": false
+      }
+    },
+    "overall_quality": "PASS",
+    "red_flags_count": 0
+  },
+  "statistics": {},
+  "symbol": "000001_000002_000004_etc50",
+  "start_date": "2018-01-01",
+  "end_date": "2024-12-31",
+  "random_seed": 42,
+  "n_samples": 76609,
+  "n_features": 16,
+  "data_hash": "8a9a8f14bcf213c6e8b20e348cedcae3",
+  "data_file": "D:\\vscode projects\\stock\\machine learning\\ML output\\snapshots\\ds_2025Q4_v2\\000001_000002_000004_etc50_data.parquet",
+  "data_format": "parquet"
+}

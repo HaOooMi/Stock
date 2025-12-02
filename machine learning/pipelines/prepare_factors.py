@@ -57,6 +57,7 @@
 import os
 import sys
 import yaml
+import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -180,11 +181,15 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
         bucket=influxdb_config['bucket']
     )
     
-    # 如果未指定tickers，可以从配置或数据库获取股票池
+    # 如果未指定tickers，从配置文件获取股票池
     if not tickers:
-        # TODO: 从配置文件或数据库获取股票池
-        print(f"\n⚠️  未指定股票列表，请在配置中设置或传入tickers参数")
-        raise ValueError("必须提供tickers参数")
+        tickers = config['data'].get('symbol', None)
+        if isinstance(tickers, str):
+            tickers = [tickers]
+        if not tickers:
+            print(f"\n⚠️  未指定股票列表，请在配置文件中设置 data.symbol")
+            raise ValueError("必须在配置文件中提供 data.symbol 参数")
+        print(f"   📋 从配置文件加载股票池: {len(tickers)} 只股票")
     
     # 批量加载市场数据（返回MultiIndex[date, ticker]格式）
     features_df = market_loader.load_market_data_batch(
@@ -229,14 +234,24 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
         limit_threshold=tradability_config.get('limit_threshold', 0.098)
     )
     
-    # 生成可交易性掩码
-    tradable_mask = tradability_filter.filter(features_df)
+    # 应用交易可行性过滤，返回带有 tradable_flag 列的数据和过滤日志
+    filter_log_path = os.path.join(ml_root, "ML output/reports/baseline_v1/tradability_filter_log.csv")
+    os.makedirs(os.path.dirname(filter_log_path), exist_ok=True)
+    features_df, filter_log_df = tradability_filter.apply_filters(
+        features_df, 
+        save_log=True, 
+        log_path=filter_log_path
+    )
+    
+    # 生成可交易性掩码（基于 tradable_flag 列）
+    tradable_mask = features_df['tradable_flag'] == 1
     tradable_ratio = tradable_mask.sum() / len(tradable_mask) * 100
     
     print(f"✅ 交易可行性过滤完成")
     print(f"   总样本数: {len(tradable_mask)}")
     print(f"   可交易样本: {tradable_mask.sum()} ({tradable_ratio:.1f}%)")
     print(f"   被过滤样本: {(~tradable_mask).sum()} ({100-tradable_ratio:.1f}%)")
+    print(f"   过滤日志: {filter_log_path}")
     
     # 2.6 加载财务数据（如果配置启用）
     financial_features = None
@@ -389,14 +404,40 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     market_cap = features_df[['market_cap']] if 'market_cap' in features_df.columns else None
     industry = features_df[['industry']] if 'industry' in features_df.columns else None
     
-    # 质量检查阈值
-    IC_THRESHOLD = 0.02
-    ICIR_THRESHOLD = 0.5
-    SPREAD_THRESHOLD = 0.0
-    CORR_THRESHOLD = 0.7
+    # ===== 从配置文件读取质量检查阈值 =====
+    quality_config = config['features'].get('factor_factory', {}).get('quality_check', {})
+    
+    # 严格标准（生产级）
+    strict_config = quality_config.get('strict', {})
+    IC_THRESHOLD_STRICT = strict_config.get('ic_threshold', 0.02)
+    ICIR_THRESHOLD_STRICT = strict_config.get('icir_threshold', 0.5)
+    IC_PVALUE_STRICT = strict_config.get('ic_pvalue', 0.05)
+    
+    # 探索标准（研究级）
+    explore_config = quality_config.get('exploratory', {})
+    IC_THRESHOLD_EXPLORE = explore_config.get('ic_threshold', 0.005)
+    ICIR_THRESHOLD_EXPLORE = explore_config.get('icir_threshold', 0.15)
+    IC_PVALUE_THRESHOLD = explore_config.get('ic_pvalue', 0.10)
+    
+    # 通用标准
+    common_config = quality_config.get('common', {})
+    SPREAD_THRESHOLD = common_config.get('spread_threshold', 0.0)
+    CORR_THRESHOLD = common_config.get('corr_threshold', 0.8)
+    PSI_THRESHOLD = common_config.get('psi_threshold', 0.25)
+    USE_ABS_IC = common_config.get('use_abs_ic', True)
+    
+    # 自动降级开关
+    AUTO_FALLBACK = quality_config.get('auto_fallback_to_exploratory', True)
+    
+    print(f"\n📋 质量检查配置 (从 ml_baseline.yml 读取):")
+    print(f"   严格标准: |IC|≥{IC_THRESHOLD_STRICT}, |ICIR|≥{ICIR_THRESHOLD_STRICT}, p<{IC_PVALUE_STRICT}")
+    print(f"   探索标准: |IC|≥{IC_THRESHOLD_EXPLORE}, |ICIR|≥{ICIR_THRESHOLD_EXPLORE}, p<{IC_PVALUE_THRESHOLD}")
+    print(f"   通用标准: Spread>{SPREAD_THRESHOLD}, MaxCorr<{CORR_THRESHOLD}, PSI<{PSI_THRESHOLD}")
+    print(f"   使用|IC|: {USE_ABS_IC}, 自动降级: {AUTO_FALLBACK}")
     
     # 逐个因子评估
-    qualified_factors = []
+    qualified_factors = []       # 严格通过
+    exploratory_factors = []     # 探索通过（宽松标准）
     quality_reports = {}
     
     print(f"\n🔍 开始横截面评估 (共 {all_factors_df.shape[1]} 个因子)...\n")
@@ -466,34 +507,54 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
             kendall_tau = monotonicity.get('kendall_tau', np.nan)
             mono_pvalue = monotonicity.get('p_value', 1)
             
-            pass_ic = ic_mean >= IC_THRESHOLD and ic_pvalue < 0.05
-            pass_icir = icir_annual >= ICIR_THRESHOLD
-            pass_spread = spread_mean > SPREAD_THRESHOLD if not np.isnan(spread_mean) else False
-            pass_mono = kendall_tau > 0 and mono_pvalue < 0.05 if not np.isnan(kendall_tau) else False
+            # ===== 计算用于筛选的IC值（支持绝对值模式）=====
+            ic_for_filter = abs(ic_mean) if USE_ABS_IC else ic_mean
+            # 对于负向因子，ICIR也取绝对值
+            icir_for_filter = abs(icir_annual) if USE_ABS_IC else icir_annual
             
-            # 深度质量检查结果
-            pass_psi = quality_report.get('psi', 1.0) < 0.25
+            # ===== 严格标准（生产级）=====
+            pass_ic_strict = ic_for_filter >= IC_THRESHOLD_STRICT and ic_pvalue < IC_PVALUE_STRICT
+            pass_icir_strict = icir_for_filter >= ICIR_THRESHOLD_STRICT
+            
+            # ===== 探索标准（研究级）=====
+            pass_ic_explore = ic_for_filter >= IC_THRESHOLD_EXPLORE and ic_pvalue < IC_PVALUE_THRESHOLD
+            pass_icir_explore = icir_for_filter >= ICIR_THRESHOLD_EXPLORE
+            
+            # ===== 通用检查 =====
+            pass_spread = spread_mean > SPREAD_THRESHOLD if not np.isnan(spread_mean) else True  # NaN时默认通过
+            pass_mono = kendall_tau > 0 and mono_pvalue < 0.05 if not np.isnan(kendall_tau) else True
+            
+            # 深度质量检查结果（使用配置的阈值）
+            pass_psi = quality_report.get('psi', 1.0) < PSI_THRESHOLD
             pass_ks = quality_report.get('ks_p', 0) > 0.05
             
-            # 相关性检查（与已有因子）
+            # 相关性检查（与已有探索因子，使用配置的阈值）
             pass_corr = True
             max_corr = 0.0
-            if qualified_factors:
-                existing_factors = all_factors_df[qualified_factors]
+            check_against = exploratory_factors if exploratory_factors else []
+            if check_against:
+                existing_factors = all_factors_df[check_against]
                 corrs = existing_factors.corrwith(single_factor_df[factor_name]).abs()
                 max_corr = corrs.max()
                 pass_corr = max_corr < CORR_THRESHOLD
             
-            # 核心指标：IC必须通过，其他指标在数据充足时才检查
-            # 股票数太少时，Spread和单调性可能为NaN，放宽条件
-            overall_pass = pass_ic and pass_icir and pass_corr
-            if not np.isnan(spread_mean):
-                overall_pass = overall_pass and pass_spread
+            # ===== 判断通过层级 =====
+            # 严格通过：IC、ICIR都满足严格标准，且相关性OK
+            strict_pass = pass_ic_strict and pass_icir_strict and pass_corr
             
-            # 保存报告
+            # 探索通过：IC、ICIR满足探索标准，且相关性OK
+            exploratory_pass = pass_ic_explore and pass_icir_explore and pass_corr
+            
+            # 兼容旧逻辑的overall_pass（现在使用探索标准，让更多因子进入下一步）
+            overall_pass = exploratory_pass
+            
+            # 保存报告（包含双层判定结果）
             quality_reports[factor_name] = {
                 'ic_mean': ic_mean,
+                'ic_abs': abs(ic_mean),  # 新增：绝对值IC
+                'ic_direction': 'positive' if ic_mean >= 0 else 'negative',  # 新增：方向
                 'icir_annual': icir_annual,
+                'icir_abs': abs(icir_annual),  # 新增：绝对值ICIR
                 'ic_pvalue': ic_pvalue,
                 'spread': spread_mean,
                 'monotonicity_tau': kendall_tau,
@@ -502,31 +563,48 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
                 'psi': quality_report.get('psi', np.nan),
                 'ks_stat': quality_report.get('ks_stat', np.nan),
                 'ks_p': quality_report.get('ks_p', np.nan),
-                'pass_ic': pass_ic,
-                'pass_icir': pass_icir,
+                # 严格标准判定
+                'pass_ic_strict': pass_ic_strict,
+                'pass_icir_strict': pass_icir_strict,
+                'strict_pass': strict_pass,
+                # 探索标准判定
+                'pass_ic_explore': pass_ic_explore,
+                'pass_icir_explore': pass_icir_explore,
+                'exploratory_pass': exploratory_pass,
+                # 通用检查
                 'pass_spread': pass_spread,
                 'pass_correlation': pass_corr,
                 'pass_psi': pass_psi,
                 'pass_ks': pass_ks,
+                # 兼容旧字段
+                'pass_ic': pass_ic_explore,
+                'pass_icir': pass_icir_explore,
                 'overall_pass': overall_pass,
-                'full_results': results  # 横截面完整结果
+                'full_results': results
             }
             
-            if overall_pass:
+            # 根据通过层级分类
+            if strict_pass:
                 qualified_factors.append(factor_name)
-                print(f"   ✅ 通过")
-                print(f"      IC={ic_mean:.4f} (ICIR={icir_annual:.2f})")
+                exploratory_factors.append(factor_name)
+                direction_mark = "⬆️" if ic_mean >= 0 else "⬇️"
+                print(f"   ✅ 严格通过 {direction_mark}")
+                print(f"      IC={ic_mean:.4f} (|IC|={abs(ic_mean):.4f}, ICIR={icir_annual:.2f})")
                 spread_str = f"{spread_mean:.4f}" if not np.isnan(spread_mean) else "N/A"
-                tau_str = f"{kendall_tau:.3f}" if not np.isnan(kendall_tau) else "N/A"
-                print(f"      Spread={spread_str}, τ={tau_str}")
+                print(f"      Spread={spread_str}, MaxCorr={max_corr:.3f}")
+            elif exploratory_pass:
+                exploratory_factors.append(factor_name)
+                direction_mark = "⬆️" if ic_mean >= 0 else "⬇️"
+                print(f"   🔍 探索通过 {direction_mark}")
+                print(f"      IC={ic_mean:.4f} (|IC|={abs(ic_mean):.4f}, ICIR={icir_annual:.2f})")
+                print(f"      (未达严格标准，但可用于排序模型实验)")
             else:
                 fail_reasons = []
-                if not pass_ic: fail_reasons.append("IC不显著")
-                if not pass_icir: fail_reasons.append("ICIR过低")
-                if not pass_spread and not np.isnan(spread_mean): fail_reasons.append("Spread≤0")
-                if not pass_corr: fail_reasons.append("与已有因子高度相关")
+                if not pass_ic_explore: fail_reasons.append(f"|IC|<{IC_THRESHOLD_EXPLORE}或p>{IC_PVALUE_THRESHOLD}")
+                if not pass_icir_explore: fail_reasons.append(f"|ICIR|<{ICIR_THRESHOLD_EXPLORE}")
+                if not pass_corr: fail_reasons.append(f"MaxCorr>{CORR_THRESHOLD}")
                 
-                print(f"   ❌ 拒绝 | {', '.join(fail_reasons) if fail_reasons else 'IC条件未满足'}")
+                print(f"   ❌ 拒绝 | {', '.join(fail_reasons)}")
         
         except Exception as e:
             print(f"   ⚠️  评估失败: {str(e)}")
@@ -538,8 +616,198 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
         print()
     
     print(f"✅ 横截面评估完成")
-    print(f"   通过因子数: {len(qualified_factors)} / {all_factors_df.shape[1]}")
-    print(f"   通过率: {len(qualified_factors) / all_factors_df.shape[1] * 100:.1f}%")
+    print(f"   严格通过: {len(qualified_factors)} / {all_factors_df.shape[1]} ({len(qualified_factors)/all_factors_df.shape[1]*100:.1f}%)")
+    print(f"   探索通过: {len(exploratory_factors)} / {all_factors_df.shape[1]} ({len(exploratory_factors)/all_factors_df.shape[1]*100:.1f}%)")
+    
+    # 如果严格通过为0，根据配置决定是否自动降级到探索标准
+    if len(qualified_factors) == 0 and len(exploratory_factors) > 0 and AUTO_FALLBACK:
+        print(f"\n⚠️  严格通过因子数为0，自动降级启用 (auto_fallback_to_exploratory: {AUTO_FALLBACK})")
+        print(f"   将使用探索通过的 {len(exploratory_factors)} 个因子继续流程")
+        print(f"   这些因子可用于排序模型实验，但建议后续优化因子质量")
+        qualified_factors = exploratory_factors.copy()
+    elif len(qualified_factors) == 0 and len(exploratory_factors) > 0 and not AUTO_FALLBACK:
+        print(f"\n⚠️  严格通过因子数为0，自动降级已禁用 (auto_fallback_to_exploratory: {AUTO_FALLBACK})")
+        print(f"   有 {len(exploratory_factors)} 个因子通过探索标准，但未启用自动降级")
+        print(f"   如需启用，请在配置文件中设置 auto_fallback_to_exploratory: true")
+    
+    # ===== 4.5 保存完整的因子体检报告 =====
+    print("\n" + "-" * 60)
+    print("保存因子体检详细报告")
+    print("-" * 60)
+    
+    screening_dir = os.path.join(ml_root, "ML output/reports/baseline_v1/factor_screening")
+    ic_series_dir = os.path.join(screening_dir, "ic_series")
+    os.makedirs(ic_series_dir, exist_ok=True)
+    
+    # 1. 保存所有因子的详细体检数据（CSV格式，方便查看）
+    screening_records = []
+    for factor_name, report in quality_reports.items():
+        record = {
+            '因子名称': factor_name,
+            'IC方向': report.get('ic_direction', ''),
+            'IC均值': report.get('ic_mean', np.nan),
+            '|IC|': report.get('ic_abs', np.nan),
+            'ICIR年化': report.get('icir_annual', np.nan),
+            '|ICIR|': report.get('icir_abs', np.nan),
+            'IC_P值': report.get('ic_pvalue', np.nan),
+            'Spread均值': report.get('spread', np.nan),
+            '单调性Tau': report.get('monotonicity_tau', np.nan),
+            '最大相关性': report.get('max_correlation', np.nan),
+            'IC半衰期': report.get('ic_half_life', np.nan),
+            'PSI': report.get('psi', np.nan),
+            'KS统计量': report.get('ks_stat', np.nan),
+            'KS_P值': report.get('ks_p', np.nan),
+            # 严格标准
+            '严格通过IC': report.get('pass_ic_strict', False),
+            '严格通过ICIR': report.get('pass_icir_strict', False),
+            '严格通过': report.get('strict_pass', False),
+            # 探索标准
+            '探索通过IC': report.get('pass_ic_explore', False),
+            '探索通过ICIR': report.get('pass_icir_explore', False),
+            '探索通过': report.get('exploratory_pass', False),
+            # 通用检查
+            '通过Spread': report.get('pass_spread', False),
+            '通过相关性': report.get('pass_correlation', True),
+            '通过PSI': report.get('pass_psi', True),
+            '通过KS': report.get('pass_ks', True),
+            '失败原因': ''
+        }
+        
+        # 记录失败原因（基于探索标准）
+        if not report.get('exploratory_pass', False):
+            fail_reasons = []
+            if not report.get('pass_ic_explore', False): 
+                fail_reasons.append(f'|IC|<{IC_THRESHOLD_EXPLORE}或p>{IC_PVALUE_THRESHOLD}')
+            if not report.get('pass_icir_explore', False): 
+                fail_reasons.append(f'|ICIR|<{ICIR_THRESHOLD_EXPLORE}')
+            if not report.get('pass_correlation', True): 
+                fail_reasons.append(f'MaxCorr>{CORR_THRESHOLD}')
+            if 'error' in report: 
+                fail_reasons.append(f"错误:{report['error']}")
+            record['失败原因'] = '; '.join(fail_reasons)
+        
+        screening_records.append(record)
+    
+    screening_df = pd.DataFrame(screening_records)
+    # 按IC均值排序（绝对值降序）
+    screening_df = screening_df.sort_values('IC均值', ascending=False, key=abs)
+    
+    screening_csv_path = os.path.join(screening_dir, f"factor_screening_detail_{datetime.now().strftime('%Y%m%d')}.csv")
+    screening_df.to_csv(screening_csv_path, index=False, encoding='utf-8-sig')
+    print(f"   ✅ 因子体检详情: {screening_csv_path}")
+    
+    # 2. 保存每个因子的IC时间序列（便于分析IC衰减和稳定性）
+    ic_saved_count = 0
+    for factor_name, report in quality_reports.items():
+        full_results = report.get('full_results', {})
+        if not full_results:
+            continue
+        
+        # 尝试提取IC时间序列
+        daily_ic = full_results.get('daily_ic', None)
+        if daily_ic is not None and len(daily_ic) > 0:
+            key_5d = (factor_name, 'ret_5d')
+            try:
+                if isinstance(daily_ic, pd.DataFrame):
+                    if key_5d in daily_ic.columns:
+                        ic_series = daily_ic[key_5d]
+                    elif 5 in daily_ic.columns:
+                        ic_series = daily_ic[5]
+                    else:
+                        ic_series = daily_ic.iloc[:, 0] if daily_ic.shape[1] > 0 else None
+                elif isinstance(daily_ic, dict):
+                    ic_series = daily_ic.get(key_5d, daily_ic.get(5, None))
+                else:
+                    ic_series = daily_ic
+                
+                if ic_series is not None and len(ic_series) > 0:
+                    ic_series_path = os.path.join(ic_series_dir, f"{factor_name}_ic_5d.csv")
+                    if isinstance(ic_series, pd.Series):
+                        ic_series.to_csv(ic_series_path, header=['ic'])
+                    else:
+                        pd.Series(ic_series).to_csv(ic_series_path, header=['ic'])
+                    ic_saved_count += 1
+            except Exception as e:
+                pass  # 忽略保存失败的情况
+    
+    print(f"   ✅ IC时间序列: {ic_saved_count} 个因子 -> {ic_series_dir}")
+    
+    # 3. 保存完整的JSON格式报告（包含更多细节，便于程序读取）
+    json_report = {
+        'generated_at': datetime.now().isoformat(),
+        'data_range': {'start': start_date, 'end': end_date},
+        'total_factors': len(quality_reports),
+        'qualified_factors_strict': len([f for f in quality_reports if quality_reports[f].get('strict_pass', False)]),
+        'qualified_factors_explore': len([f for f in quality_reports if quality_reports[f].get('exploratory_pass', False)]),
+        'pass_rate': len(qualified_factors) / len(quality_reports) * 100 if quality_reports else 0,
+        'thresholds': {
+            'strict': {
+                'ic_threshold': IC_THRESHOLD_STRICT,
+                'icir_threshold': ICIR_THRESHOLD_STRICT,
+            },
+            'exploratory': {
+                'ic_threshold': IC_THRESHOLD_EXPLORE,
+                'icir_threshold': ICIR_THRESHOLD_EXPLORE,
+                'ic_pvalue': IC_PVALUE_THRESHOLD,
+            },
+            'common': {
+                'spread_threshold': SPREAD_THRESHOLD,
+                'corr_threshold': CORR_THRESHOLD,
+                'use_abs_ic': USE_ABS_IC,
+            }
+        },
+        'factors': {}
+    }
+    
+    for factor_name, report in quality_reports.items():
+        # 移除 full_results（太大了，不适合放JSON）
+        factor_report = {k: v for k, v in report.items() if k != 'full_results'}
+        # 处理 NaN 值和 numpy 类型
+        for key, value in factor_report.items():
+            if isinstance(value, (np.floating, float)) and np.isnan(value):
+                factor_report[key] = None
+            elif isinstance(value, (np.bool_, bool)):
+                factor_report[key] = bool(value)
+            elif isinstance(value, (np.integer,)):
+                factor_report[key] = int(value)
+            elif isinstance(value, (np.floating,)):
+                factor_report[key] = float(value)
+        json_report['factors'][factor_name] = factor_report
+    
+    json_path = os.path.join(screening_dir, f"factor_screening_summary_{datetime.now().strftime('%Y%m%d')}.json")
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(json_report, f, indent=2, ensure_ascii=False)
+    print(f"   ✅ JSON汇总报告: {json_path}")
+    
+    # 4. 打印体检统计
+    strict_count = sum(1 for r in quality_reports.values() if r.get('strict_pass', False))
+    explore_count = sum(1 for r in quality_reports.values() if r.get('exploratory_pass', False))
+    
+    print(f"\n📊 因子体检统计:")
+    print(f"   总因子数: {len(quality_reports)}")
+    print(f"   严格通过: {strict_count} ({strict_count/len(quality_reports)*100:.1f}%)")
+    print(f"   探索通过: {explore_count} ({explore_count/len(quality_reports)*100:.1f}%)")
+    print(f"   未通过: {len(quality_reports) - explore_count}")
+    
+    # 统计各项检查的通过情况
+    pass_counts = {
+        '|IC|探索达标': sum(1 for r in quality_reports.values() if r.get('pass_ic_explore', False)),
+        '|IC|严格达标': sum(1 for r in quality_reports.values() if r.get('pass_ic_strict', False)),
+        '|ICIR|探索达标': sum(1 for r in quality_reports.values() if r.get('pass_icir_explore', False)),
+        '|ICIR|严格达标': sum(1 for r in quality_reports.values() if r.get('pass_icir_strict', False)),
+        'Spread>0': sum(1 for r in quality_reports.values() if r.get('pass_spread', False)),
+        '低相关性': sum(1 for r in quality_reports.values() if r.get('pass_correlation', True)),
+    }
+    print(f"\n   各项检查通过率:")
+    for check_name, count in pass_counts.items():
+        print(f"   - {check_name}: {count}/{len(quality_reports)} ({count/len(quality_reports)*100:.1f}%)")
+    
+    # 统计正向/负向因子
+    positive_factors = [f for f, r in quality_reports.items() if r.get('ic_direction') == 'positive' and r.get('exploratory_pass', False)]
+    negative_factors = [f for f, r in quality_reports.items() if r.get('ic_direction') == 'negative' and r.get('exploratory_pass', False)]
+    print(f"\n   因子方向分布 (探索通过):")
+    print(f"   - 正向因子 ⬆️: {len(positive_factors)}")
+    print(f"   - 负向因子 ⬇️: {len(negative_factors)}")
     
     # 5. 因子入库
     print("\n" + "=" * 80)
@@ -839,7 +1107,7 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
         if pass_ic:
             significant_factors.append(factor_name)
     
-    print(f"   要求: IC > 0.02 且统计显著")
+    print(f"   要求: |IC| ≥ {IC_THRESHOLD_STRICT} 且统计显著 (p < {IC_PVALUE_STRICT})")
     print(f"   实际: {len(significant_factors)} / {len(qualified_factors)} 个因子显著")
     
     if len(significant_factors) < len(qualified_factors) * 0.8:
@@ -905,28 +1173,9 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
 if __name__ == "__main__":
     """运行因子准备流程"""
     
-    # 加载配置文件获取参数
-    config = load_config("configs/ml_baseline.yml")
-    
-    # 从配置文件读取股票代码（纯数字格式，如 '000001'，不是 '000001.SZ'）
-    # 因为 InfluxDB 中存储的股票代码是纯数字格式
-    tickers = config['data'].get('symbol', ['000001', '000002', '000063'])
-    if isinstance(tickers, str):
-        tickers = [tickers]
-    
-    # 从配置文件读取日期范围
-    start_date = config['data'].get('start_date', '2018-01-01')
-    end_date = config['data'].get('end_date', '2024-12-31')
-    
-    print(f"\n📋 从配置文件读取参数:")
-    print(f"   股票代码: {tickers}")
-    print(f"   日期范围: {start_date} ~ {end_date}")
-    
+    # 直接运行，所有参数从配置文件读取（股票池、日期范围等）
     qualified_factors_df, quality_reports, manager = prepare_factors(
-        config_path="configs/ml_baseline.yml",
-        start_date=start_date,
-        end_date=end_date,
-        tickers=tickers
+        config_path="configs/ml_baseline.yml"
     )
     
     print("\n✅ 流程执行完成！")
