@@ -181,6 +181,31 @@ target:
   # 标签变换（可选）
   transform: "none"          # 标签变换：'none', 'residual_vs_index', 'residual_vs_industry', 'rank'
   
+# ===================== 排序模型配置 =====================
+ranking:
+  # 任务类型：'regression'（原始收益）、'regression_rank'（Reg-on-Rank）、'lambdarank'（排序模型）
+  task_type: "regression"
+  
+  # Reg-on-Rank 配置
+  regression_rank:
+    rank_method: "zscore"      # 排序值变换：'zscore', 'gauss', 'uniform'
+    min_samples_per_day: 30    # 每日最少样本数
+  
+  # LambdaRank 配置
+  lambdarank:
+    n_bins: 5                  # 分箱数（标签等级数）
+    min_samples_per_day: 30    # 每日最少样本数
+    ndcg_eval_at: [10, 30, 50] # NDCG@K 评估位置
+    # 各等级增益权重（可选，默认自动计算 [0,1,3,7,15,...]）
+    # label_gain: [0, 1, 3, 7, 15]
+  
+  # 验收标准
+  acceptance:
+    ic_improvement_ratio: 0.2  # 相比回归基线 IC 提升比例（≥20%）
+    min_icir: 0.4              # 最低 ICIR 要求
+    min_spread: 0.0            # Top-Mean Spread > 0
+    min_top_coverage: 0.1      # Top bucket 最小覆盖率（10%）
+
 # ===================== 数据切分配置 =====================
 split:
   # 时间切分
@@ -226,7 +251,7 @@ models:
       random_state: 42
       n_jobs: -1
       
-  # LightGBM
+  # LightGBM 回归
   lightgbm:
     enabled: true  # 如果安装失败会自动跳过
     params:
@@ -236,6 +261,25 @@ models:
       max_depth: 8
       min_data_in_leaf: 20
       feature_fraction: 0.8
+      bagging_fraction: 0.8
+      bagging_freq: 5
+      lambda_l1: 0.1
+      lambda_l2: 0.1
+      random_state: 42
+      verbose: -1
+  
+  # LightGBM 排序模型（LambdaRank）
+  lightgbm_ranker:
+    enabled: true
+    params:
+      objective: "lambdarank"
+      metric: "ndcg"
+      n_estimators: 500
+      learning_rate: 0.05
+      num_leaves: 31
+      max_depth: 6            # 比回归更浅，防止过拟合
+      min_data_in_leaf: 50    # 比回归更大，增强泛化
+      feature_fraction: 0.7
       bagging_fraction: 0.8
       bagging_freq: 5
       lambda_l1: 0.1
