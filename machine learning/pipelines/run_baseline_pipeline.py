@@ -1,32 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-排序模型训练管道 - 三条线对比
+Baseline 模型训练管道 - Learning-to-Rank 三条线对比
 
 功能：
 1. Baseline A：回归原始收益（LGBMRegressor）
-2. Baseline B：Reg-on-Rank（LGBMRegressor + 排序标签）
+2. Baseline B：Reg-on-Rank（LGBMRegressor + GaussRank 标签）
 3. Sorting：LambdaRank（LGBMRanker）
 
-统一使用 CrossSectionAnalyzer 评估，对比三条线的：
-- Rank IC / ICIR
-- Top-Mean / Top-Bottom Spread
-- 稳定性 / 漂移
+流程：
+1. 数据加载（复用 DataLoader）
+2. 时序 CV 切分（Purged + Embargo）
+3. 漂移检测（train/valid/test 分布差异）
+4. 三条线模型训练
+5. 横截面评估（CrossSectionAnalyzer）
+6. 结果对比与报告
 
 使用方法：
-    python run_ranking_pipeline.py
-    python run_ranking_pipeline.py --task_type lambdarank
-    python run_ranking_pipeline.py --compare_all  # 运行三条线对比
+    python run_baseline_pipeline.py
+    python run_baseline_pipeline.py --task_type lambdarank
+    python run_baseline_pipeline.py --compare_all  # 运行三条线对比
 
 输出：
     /ML output/reports/baseline_v1/ranking/
     ├── model_comparison.json
+    ├── drift_report.json
     ├── regression_results.json
     ├── regression_rank_results.json
     ├── lambdarank_results.json
-    └── comparison_tearsheet.html
+    └── {task_type}_model.pkl
 
-创建: 2025-12-04 | 版本: v1.0
+创建: 2025-12-04 | 版本: v1.1
 """
 
 import os
@@ -53,6 +57,7 @@ from models.lgbm_model import LightGBMModel
 from models.lgbm_ranker import LightGBMRanker, prepare_ranking_data
 from evaluation.cross_section_analyzer import CrossSectionAnalyzer
 from evaluation.cross_section_metrics import calculate_forward_returns
+from evaluation.drift_detector import DriftDetector
 
 
 def load_config(config_path: str = "configs/ml_baseline.yml") -> dict:
@@ -413,9 +418,93 @@ def compare_results(results: Dict[str, Dict], output_dir: str) -> Dict:
     return comparison
 
 
+def run_drift_detection(features: pd.DataFrame,
+                        train_idx: pd.Index,
+                        valid_idx: pd.Index,
+                        test_idx: pd.Index,
+                        output_dir: str,
+                        drift_threshold: float = 0.2) -> Dict:
+    """
+    运行漂移检测
+    
+    Parameters:
+    -----------
+    features : pd.DataFrame
+        特征数据
+    train_idx, valid_idx, test_idx : pd.Index
+        切分索引
+    output_dir : str
+        输出目录
+    drift_threshold : float
+        漂移阈值（PSI）
+        
+    Returns:
+    --------
+    dict
+        漂移检测结果
+    """
+    print("\n" + "=" * 70)
+    print("漂移检测 (Train vs Valid vs Test)")
+    print("=" * 70)
+    
+    detector = DriftDetector(drift_threshold=drift_threshold)
+    
+    # 检测 Train vs Valid
+    train_features = features.loc[train_idx]
+    valid_features = features.loc[valid_idx]
+    test_features = features.loc[test_idx]
+    
+    drift_results = {
+        'train_vs_valid': {},
+        'train_vs_test': {},
+        'drifted_features': []
+    }
+    
+    # 逐特征检测
+    drifted = []
+    for col in features.columns[:20]:  # 只检测前20个特征
+        try:
+            psi_valid = detector.calculate_psi(
+                train_features[col].dropna(),
+                valid_features[col].dropna()
+            )
+            psi_test = detector.calculate_psi(
+                train_features[col].dropna(),
+                test_features[col].dropna()
+            )
+            
+            drift_results['train_vs_valid'][col] = float(psi_valid)
+            drift_results['train_vs_test'][col] = float(psi_test)
+            
+            if psi_valid > drift_threshold or psi_test > drift_threshold:
+                drifted.append(col)
+                
+        except Exception:
+            continue
+    
+    drift_results['drifted_features'] = drifted
+    drift_results['n_drifted'] = len(drifted)
+    drift_results['n_checked'] = min(20, len(features.columns))
+    
+    # 打印摘要
+    print(f"   检测特征数: {drift_results['n_checked']}")
+    print(f"   漂移特征数: {drift_results['n_drifted']}")
+    if drifted:
+        print(f"   漂移特征: {drifted[:5]}{'...' if len(drifted) > 5 else ''}")
+    
+    # 保存结果
+    drift_path = os.path.join(output_dir, 'drift_report.json')
+    with open(drift_path, 'w', encoding='utf-8') as f:
+        json.dump(drift_results, f, indent=2, ensure_ascii=False)
+    
+    print(f"✅ 漂移报告已保存: {drift_path}")
+    
+    return drift_results
+
+
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description='排序模型训练管道')
+    parser = argparse.ArgumentParser(description='Baseline 模型训练管道')
     parser.add_argument('--config', type=str, default='configs/ml_baseline.yml',
                         help='配置文件路径')
     parser.add_argument('--task_type', type=str, default=None,
@@ -423,11 +512,13 @@ def main():
                         help='任务类型（默认从配置读取）')
     parser.add_argument('--compare_all', action='store_true',
                         help='运行三条线对比')
+    parser.add_argument('--skip_drift', action='store_true',
+                        help='跳过漂移检测')
     
     args = parser.parse_args()
     
     print("=" * 70)
-    print("排序模型训练管道")
+    print("Baseline 模型训练管道 (Learning-to-Rank)")
     print("=" * 70)
     print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -480,10 +571,22 @@ def main():
     cv = TimeSeriesCV.from_config(config)
     train_idx, valid_idx, test_idx = cv.single_split(features)
     
-    print(f"\n📊 时序切分:")
+    print(f"\n📊 时序切分 (Purged + Embargo):")
     print(f"   训练集: {len(train_idx):,}")
     print(f"   验证集: {len(valid_idx):,}")
     print(f"   测试集: {len(test_idx):,}")
+    
+    # 漂移检测
+    if not args.skip_drift:
+        drift_threshold = config.get('split', {}).get('drift_threshold', 0.2)
+        run_drift_detection(
+            features=features,
+            train_idx=train_idx,
+            valid_idx=valid_idx,
+            test_idx=test_idx,
+            output_dir=output_dir,
+            drift_threshold=drift_threshold
+        )
     
     # 运行各任务
     all_results = {}
@@ -511,7 +614,7 @@ def main():
         compare_results(all_results, output_dir)
     
     print("\n" + "=" * 70)
-    print("✅ 排序模型训练完成")
+    print("✅ Baseline 模型训练完成")
     print("=" * 70)
 
 

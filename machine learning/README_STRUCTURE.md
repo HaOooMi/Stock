@@ -150,9 +150,57 @@ ML output/
 
 ---
 
-### 2️⃣ 模型训练 (`pipelines/train_models.py`)
+### 2️⃣ Baseline 模型训练 (`pipelines/run_baseline_pipeline.py`) ⭐新增
 
-**功能**: Ridge/RF/LightGBM 训练与评估
+**功能**: Learning-to-Rank 三条线对比
+
+**这是因子策略的核心训练流程！**
+
+**调用的核心模块**:
+- `data/data_loader.py` - 数据加载（特征 + 目标）
+- `data/time_series_cv.py` - 时序切分（Purged + Embargo）
+- `evaluation/drift_detector.py` - 漂移检测（PSI）
+- `targets/ranking_labels.py` - 排序标签构造（GaussRank / LambdaRank）
+- `models/lgbm_model.py` - LightGBM 回归（Baseline A/B）
+- `models/lgbm_ranker.py` - LightGBM 排序（Baseline C）
+- `evaluation/cross_section_analyzer.py` - 横截面评估（IC/ICIR/Spread）
+
+**使用方式**:
+```bash
+# 三条线对比（推荐）
+python pipelines/run_baseline_pipeline.py --compare_all
+
+# 单个任务类型
+python pipelines/run_baseline_pipeline.py --task_type lambdarank
+```
+
+**三条线说明**:
+| 任务类型 | 标签 | 模型 | 说明 |
+|---------|------|------|------|
+| regression | 原始收益 | LGBMRegressor | Baseline A |
+| regression_rank | GaussRank | LGBMRegressor | Baseline B (Reg-on-Rank) |
+| lambdarank | 分箱等级 | LGBMRanker | Baseline C (Sorting) |
+
+**输出文件**:
+```
+ML output/reports/baseline_v1/ranking/
+├── drift_report.json              # 漂移检测报告
+├── regression_results.json        # Baseline A 结果
+├── regression_rank_results.json   # Baseline B 结果
+├── lambdarank_results.json        # Baseline C 结果
+├── model_comparison.json          # 三条线对比汇总
+├── regression_model.pkl           # Baseline A 模型
+├── regression_rank_model.pkl      # Baseline B 模型
+└── lambdarank_model.pkl           # Baseline C 模型
+```
+
+**详细文档**: `pipelines/README_BASELINE_PIPELINE.md`
+
+---
+
+### 2️⃣-B 传统模型训练 (`pipelines/train_models.py`)
+
+**功能**: Ridge/RF/LightGBM 传统训练与评估（无排序优化）
 
 **调用的核心模块**:
 - `models/ridge_model.py` - Ridge回归
@@ -289,7 +337,7 @@ ML output/reports/baseline_v1/
 ## 🔄 完整流程示意图
 
 ```
-【⭐ 主流程：因子研究 (实盘推荐)】
+【⭐ 主流程1：因子研究 (实盘推荐)】
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ prepare_factors.py                                                       │
 │ (因子工厂完整流程：过滤+快照+因子+评估+图表)                                │
@@ -304,6 +352,20 @@ ML output/reports/baseline_v1/
 │ Step 5: 因子入库 (FactorLibraryManager)                                  │
 │ Step 6: 生成Tearsheet + 图表 (visualization.py) → reports/ + figures/    │
 │ Step 7: 验收检查                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+              ↓ (因子数据已就绪)
+【⭐ 主流程2：Baseline 模型训练 (Learning-to-Rank)】
+┌─────────────────────────────────────────────────────────────────────────┐
+│ run_baseline_pipeline.py --compare_all                                   │
+│ (三条线对比：Regression vs Reg-on-Rank vs LambdaRank)                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Step 1: 数据加载 (DataLoader)                                            │
+│ Step 2: 时序切分 (TimeSeriesCV: Purged + Embargo)                        │
+│ Step 3: 漂移检测 (DriftDetector: PSI)                                    │
+│ Step 4: 标签构造 (RankingLabelFactory: GaussRank / LambdaRank)           │
+│ Step 5: 模型训练 (LightGBMModel / LightGBMRanker)                        │
+│ Step 6: 横截面评估 (CrossSectionAnalyzer: IC/ICIR/Spread)                │
+│ Step 7: 三条线对比 → model_comparison.json                               │
 └─────────────────────────────────────────────────────────────────────────┘
 
 【传统流程：现代机器学习】
@@ -380,7 +442,15 @@ ML output/reports/baseline_v1/
 | `{symbol}_data.parquet` | prepare_data_with_snapshot.py → data_snapshot.py | Parquet格式数据快照（带过滤+PIT）|
 | `metadata.json` | prepare_data_with_snapshot.py → data_snapshot.py | 快照元数据（包含过滤统计、PIT验证结果）|
 | `{snapshot_id}.json` | prepare_data_with_snapshot.py → data_snapshot.py | 数据质量报告（缺失率、异常值、统计信息）|
-| **模型训练相关** |||
+| **Baseline 模型训练相关（推荐）** |||
+| `regression_results.json` | run_baseline_pipeline.py | Baseline A 训练结果 |
+| `regression_rank_results.json` | run_baseline_pipeline.py | Baseline B 训练结果 |
+| `lambdarank_results.json` | run_baseline_pipeline.py | Baseline C 训练结果 |
+| `model_comparison.json` | run_baseline_pipeline.py | 三条线对比汇总 |
+| `drift_report.json` | run_baseline_pipeline.py → drift_detector.py | 漂移检测报告 |
+| `{task_type}_model.pkl` | run_baseline_pipeline.py → lgbm_model/lgbm_ranker | 训练好的模型 |
+| `{task_type}_predictions.parquet` | run_baseline_pipeline.py | 模型预测结果 |
+| **传统模型训练相关** |||
 | `ridge_model.pkl` | ridge_model.py | Ridge回归模型 |
 | `randomforest_model.pkl` | rf_model.py | 随机森林模型 |
 | `lightgbm_model.pkl` | lgbm_model.py | LightGBM模型 |
