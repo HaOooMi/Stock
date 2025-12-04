@@ -305,7 +305,11 @@ save_quantile_returns_to_csv(
 
 ### 6. drift_detector (`drift_detector.py`)
 
-**漂移检测（Train vs Valid vs Test）**。
+**漂移检测模块（特征分布 + 模型预测）**。
+
+提供两种漂移检测：
+1. **特征分布漂移（PSI）**：训练前检测，发现数据质量/市场环境变化
+2. **模型预测漂移（IC/Spread）**：训练后检测，验证模型泛化能力
 
 ```python
 from evaluation import DriftDetector, compare_splits_with_analyzer
@@ -315,29 +319,69 @@ detector = DriftDetector(
     significance_level=0.05
 )
 
-# 比较 IC 汇总
-comparison = detector.compare_ic_summaries(
+# ============================================
+# 1. 特征分布漂移检测（PSI）- 训练前
+# ============================================
+
+# 计算单个特征的 PSI
+psi = detector.calculate_psi(
+    expected=train_features['factor'],   # 基准分布（训练集）
+    actual=test_features['factor'],      # 实际分布（测试集）
+    n_bins=10
+)
+# PSI < 0.1: 分布稳定
+# 0.1 ≤ PSI < 0.2: 轻微漂移
+# PSI ≥ 0.2: 显著漂移
+
+# 批量检测所有特征的分布漂移
+feature_drift = detector.detect_feature_drift(
+    train_features=train_features,
+    valid_features=valid_features,
+    test_features=test_features,
+    max_features=None  # None 表示检测所有特征
+)
+# 返回: train_vs_valid, train_vs_test, drifted_features, n_drifted
+
+# ============================================
+# 2. 模型预测漂移检测（IC/Spread）- 训练后
+# ============================================
+
+# 比较 IC 汇总（Valid vs Test 差异 < 20%）
+ic_comparison = detector.compare_ic_summaries(
     train_summary=train_ic_summary,
     valid_summary=valid_ic_summary,
     test_summary=test_ic_summary
 )
 
-# 计算 PSI（Population Stability Index）
-psi = detector.calculate_psi(
-    reference_data=train_features['factor'],
-    current_data=test_features['factor']
-)
-# PSI < 0.1: 无漂移
-# 0.1 ≤ PSI < 0.2: 轻微漂移
-# PSI ≥ 0.2: 显著漂移
-
-# KS 检验
-ks_stat, p_value = detector.ks_test(
-    reference_data=train_features,
-    current_data=test_features
+# 比较 Spread
+spread_comparison = detector.compare_spreads(
+    train_spread=train_spread,
+    valid_spread=valid_spread,
+    test_spread=test_spread
 )
 
-# 一键对比（与 CrossSectionAnalyzer 集成）
+# IC 分布统计检验（KS/t-test/Mann-Whitney U）
+stat_test = detector.statistical_test_ic(
+    ic_series_1=valid_ic_series,
+    ic_series_2=test_ic_series,
+    test_type='ks'  # 'ks', 'ttest', 'mannwhitneyu'
+)
+
+# 综合漂移检测（IC + Spread + 统计检验）
+drift_report = detector.detect_drift(
+    train_results=train_analyzer_results,
+    valid_results=valid_analyzer_results,
+    test_results=test_analyzer_results,
+    factor_name='model_score',
+    period='5d'
+)
+# 返回: overall_pass, checks (ic_comparison, spread_comparison, statistical_test)
+
+# ============================================
+# 3. 一键对比（便捷函数）
+# ============================================
+
+# 与 CrossSectionAnalyzer 集成，自动分析各分割并对比
 results = compare_splits_with_analyzer(
     factors=factors_df,
     forward_returns=forward_returns,
@@ -347,6 +391,17 @@ results = compare_splits_with_analyzer(
     output_dir='reports/cv/',
     drift_threshold=0.2
 )
+# 自动生成: drift_report.json, drift_tearsheet.html, split_comparison.csv
+```
+
+**验收标准（研究宪章）**：
+| 检测类型 | 阈值 | 说明 |
+|---------|------|------|
+| 特征 PSI | < 0.2 | PSI ≥ 0.2 表示显著分布漂移 |
+| IC 差异 | < 20% | Valid vs Test 的 IC 差异 |
+| ICIR 差异 | < 20% | Valid vs Test 的 ICIR 差异 |
+| Spread 差异 | < 20% | Valid vs Test 的 Spread 差异 |
+| 统计检验 | p > 0.05 | KS 检验无显著差异 |
 ```
 
 ---

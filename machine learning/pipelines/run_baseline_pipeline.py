@@ -11,26 +11,30 @@ Baseline 模型训练管道 - Learning-to-Rank 三条线对比
 流程：
 1. 数据加载（复用 DataLoader）
 2. 时序 CV 切分（Purged + Embargo）
-3. 漂移检测（train/valid/test 分布差异）
+3. 特征分布漂移检测（PSI）- 训练前
 4. 三条线模型训练
 5. 横截面评估（CrossSectionAnalyzer）
-6. 结果对比与报告
+6. 模型预测漂移检测（IC/Spread）- 训练后
+7. 结果对比与报告
 
 使用方法：
     python run_baseline_pipeline.py
     python run_baseline_pipeline.py --task_type lambdarank
     python run_baseline_pipeline.py --compare_all  # 运行三条线对比
+    python run_baseline_pipeline.py --skip_drift   # 跳过漂移检测
 
 输出：
     /ML output/reports/baseline_v1/ranking/
-    ├── model_comparison.json
-    ├── drift_report.json
+    ├── model_comparison.json           # 三条线对比结果
+    ├── feature_drift_report.json       # 特征分布漂移检测（PSI）
+    ├── prediction_drift_report.json    # 模型预测漂移检测（IC/Spread）
     ├── regression_results.json
     ├── regression_rank_results.json
     ├── lambdarank_results.json
+    ├── {task_type}_predictions.parquet
     └── {task_type}_model.pkl
 
-创建: 2025-12-04 | 版本: v1.1
+创建: 2025-12-04 | 版本: v1.2
 """
 
 import os
@@ -91,8 +95,6 @@ def prepare_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
     if isinstance(symbols, str):
         symbols = [symbols]
     
-    start_date = data_config['start_date']
-    end_date = data_config['end_date']
     forward_periods = target_config['forward_periods']
     target_col = f"future_return_{forward_periods}d"
     
@@ -202,7 +204,7 @@ def run_single_task(task_type: str,
     )
     
     labels = label_result['labels']
-    groups = label_result['groups']
+    # 注意：groups 在切分后会重新计算，这里不需要保留
     
     # 对齐特征与标签
     X_aligned, y_aligned = label_factory.align_features_with_labels(features, labels)
@@ -217,6 +219,7 @@ def run_single_task(task_type: str,
     X_valid = X_aligned.loc[valid_common].sort_index(level='date')
     y_valid = y_aligned.loc[valid_common].sort_index(level='date')
     X_test = X_aligned.loc[test_common].sort_index(level='date')
+    # y_test 用于未来计算测试集排序损失（如 NDCG），当前评估用原始收益
     y_test = y_aligned.loc[test_common].sort_index(level='date')
     
     print(f"训练集: {len(X_train):,} 样本")
@@ -418,14 +421,20 @@ def compare_results(results: Dict[str, Dict], output_dir: str) -> Dict:
     return comparison
 
 
-def run_drift_detection(features: pd.DataFrame,
-                        train_idx: pd.Index,
-                        valid_idx: pd.Index,
-                        test_idx: pd.Index,
-                        output_dir: str,
-                        drift_threshold: float = 0.2) -> Dict:
+def run_feature_drift_detection(features: pd.DataFrame,
+                                 train_idx: pd.Index,
+                                 valid_idx: pd.Index,
+                                 test_idx: pd.Index,
+                                 output_dir: str,
+                                 drift_threshold: float = 0.2,
+                                 max_features: Optional[int] = None) -> Dict:
     """
-    运行漂移检测
+    运行特征分布漂移检测（训练前）
+    
+    使用 PSI 检测特征分布是否发生变化，用于：
+    - 发现数据质量问题
+    - 检测市场环境变化
+    - 决定是否需要重新训练模型
     
     Parameters:
     -----------
@@ -436,7 +445,9 @@ def run_drift_detection(features: pd.DataFrame,
     output_dir : str
         输出目录
     drift_threshold : float
-        漂移阈值（PSI）
+        漂移阈值（PSI >= 0.2 表示显著漂移）
+    max_features : int, optional
+        最多检测的特征数量，None 表示检测所有特征
         
     Returns:
     --------
@@ -444,62 +455,166 @@ def run_drift_detection(features: pd.DataFrame,
         漂移检测结果
     """
     print("\n" + "=" * 70)
-    print("漂移检测 (Train vs Valid vs Test)")
+    print("特征分布漂移检测 (PSI)")
     print("=" * 70)
     
+    # 使用 DriftDetector 模块
     detector = DriftDetector(drift_threshold=drift_threshold)
     
-    # 检测 Train vs Valid
+    # 按索引切分特征
     train_features = features.loc[train_idx]
     valid_features = features.loc[valid_idx]
     test_features = features.loc[test_idx]
     
-    drift_results = {
-        'train_vs_valid': {},
-        'train_vs_test': {},
-        'drifted_features': []
-    }
-    
-    # 逐特征检测
-    drifted = []
-    for col in features.columns[:20]:  # 只检测前20个特征
-        try:
-            psi_valid = detector.calculate_psi(
-                train_features[col].dropna(),
-                valid_features[col].dropna()
-            )
-            psi_test = detector.calculate_psi(
-                train_features[col].dropna(),
-                test_features[col].dropna()
-            )
-            
-            drift_results['train_vs_valid'][col] = float(psi_valid)
-            drift_results['train_vs_test'][col] = float(psi_test)
-            
-            if psi_valid > drift_threshold or psi_test > drift_threshold:
-                drifted.append(col)
-                
-        except Exception:
-            continue
-    
-    drift_results['drifted_features'] = drifted
-    drift_results['n_drifted'] = len(drifted)
-    drift_results['n_checked'] = min(20, len(features.columns))
+    # 检测特征分布漂移
+    drift_results = detector.detect_feature_drift(
+        train_features=train_features,
+        valid_features=valid_features,
+        test_features=test_features,
+        max_features=max_features
+    )
     
     # 打印摘要
     print(f"   检测特征数: {drift_results['n_checked']}")
     print(f"   漂移特征数: {drift_results['n_drifted']}")
+    drifted = drift_results['drifted_features']
     if drifted:
         print(f"   漂移特征: {drifted[:5]}{'...' if len(drifted) > 5 else ''}")
     
     # 保存结果
-    drift_path = os.path.join(output_dir, 'drift_report.json')
+    drift_path = os.path.join(output_dir, 'feature_drift_report.json')
     with open(drift_path, 'w', encoding='utf-8') as f:
         json.dump(drift_results, f, indent=2, ensure_ascii=False)
     
-    print(f"✅ 漂移报告已保存: {drift_path}")
+    print(f"✅ 特征漂移报告已保存: {drift_path}")
     
     return drift_results
+
+
+def run_prediction_drift_detection(predictions: Dict[str, pd.Series],
+                                    forward_returns: pd.DataFrame,
+                                    train_idx: pd.Index,
+                                    valid_idx: pd.Index,
+                                    test_idx: pd.Index,
+                                    output_dir: str,
+                                    drift_threshold: float = 0.2) -> Dict:
+    """
+    运行模型预测漂移检测（训练后）
+    
+    比较 Train/Valid/Test 的 IC 和 Spread 差异，用于：
+    - 验证模型泛化能力
+    - 检测过拟合
+    - 满足研究宪章验收标准（Valid vs Test 差异 < 20%）
+    
+    Parameters:
+    -----------
+    predictions : Dict[str, pd.Series]
+        各任务类型的预测结果 {task_type: pred_series}
+    forward_returns : pd.DataFrame
+        远期收益
+    train_idx, valid_idx, test_idx : pd.Index
+        切分索引
+    output_dir : str
+        输出目录
+    drift_threshold : float
+        漂移阈值（默认 20%）
+        
+    Returns:
+    --------
+    dict
+        预测漂移检测结果
+    """
+    print("\n" + "=" * 70)
+    print("模型预测漂移检测 (IC/Spread)")
+    print("=" * 70)
+    
+    detector = DriftDetector(drift_threshold=drift_threshold)
+    
+    all_drift_reports = {}
+    
+    for task_type, pred_series in predictions.items():
+        print(f"\n📊 检测 {task_type}...")
+        
+        # 获取各分割的预测和收益
+        train_common = train_idx.intersection(pred_series.index)
+        valid_common = valid_idx.intersection(pred_series.index)
+        test_common = test_idx.intersection(pred_series.index)
+        
+        if len(train_common) == 0 or len(valid_common) == 0 or len(test_common) == 0:
+            print(f"   ⚠️ {task_type} 数据不足，跳过")
+            continue
+        
+        # 构建因子 DataFrame
+        factors = pred_series.to_frame('model_score')
+        
+        # 分别分析各分割
+        train_analyzer = CrossSectionAnalyzer(
+            factors=factors.loc[train_common],
+            forward_returns=forward_returns.loc[train_common]
+        )
+        train_analyzer.analyze()
+        train_results = train_analyzer.get_results()
+        
+        valid_analyzer = CrossSectionAnalyzer(
+            factors=factors.loc[valid_common],
+            forward_returns=forward_returns.loc[valid_common]
+        )
+        valid_analyzer.analyze()
+        valid_results = valid_analyzer.get_results()
+        
+        test_analyzer = CrossSectionAnalyzer(
+            factors=factors.loc[test_common],
+            forward_returns=forward_returns.loc[test_common]
+        )
+        test_analyzer.analyze()
+        test_results = test_analyzer.get_results()
+        
+        # 使用 DriftDetector 的 detect_drift 方法
+        ret_col = list(forward_returns.columns)[0]
+        period = ret_col.replace('ret_', '')
+        
+        drift_report = detector.detect_drift(
+            train_results=train_results,
+            valid_results=valid_results,
+            test_results=test_results,
+            factor_name='model_score',
+            period=period
+        )
+        
+        all_drift_reports[task_type] = drift_report
+    
+    # 保存结果
+    drift_path = os.path.join(output_dir, 'prediction_drift_report.json')
+    
+    # 转换为可序列化格式
+    def convert_to_native(obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, pd.Series):
+            return obj.to_dict()
+        elif isinstance(obj, dict):
+            return {k: convert_to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_native(i) for i in obj]
+        return obj
+    
+    with open(drift_path, 'w', encoding='utf-8') as f:
+        json.dump(convert_to_native(all_drift_reports), f, indent=2, ensure_ascii=False)
+    
+    print(f"\n✅ 预测漂移报告已保存: {drift_path}")
+    
+    # 汇总结果
+    print("\n📊 预测漂移检测汇总:")
+    print("-" * 60)
+    for task_type, report in all_drift_reports.items():
+        status = "✅ 通过" if report.get('overall_pass', False) else "❌ 未通过"
+        print(f"   {task_type}: {status}")
+    
+    return all_drift_reports
 
 
 def main():
@@ -542,30 +657,7 @@ def main():
     print(f"📁 输出目录: {output_dir}")
     
     # 准备数据
-    try:
-        features, forward_returns, prices = prepare_data(config)
-    except Exception as e:
-        print(f"❌ 数据准备失败: {e}")
-        print("尝试使用模拟数据进行测试...")
-        
-        # 模拟数据（用于测试）
-        np.random.seed(42)
-        dates = pd.date_range('2020-01-01', periods=500, freq='D')
-        tickers = [f'{i:06d}' for i in range(1, 51)]
-        index = pd.MultiIndex.from_product([dates, tickers], names=['date', 'ticker'])
-        
-        features = pd.DataFrame(
-            np.random.randn(len(index), 20),
-            columns=[f'feature_{i}' for i in range(20)],
-            index=index
-        )
-        
-        forward_returns = pd.DataFrame({
-            'ret_5d': np.random.randn(len(index)) * 0.05
-        }, index=index)
-        
-        prices = None
-        print(f"✅ 模拟数据生成完成: {features.shape}")
+    features, forward_returns, prices = prepare_data(config)
     
     # 时序切分
     cv = TimeSeriesCV.from_config(config)
@@ -576,10 +668,10 @@ def main():
     print(f"   验证集: {len(valid_idx):,}")
     print(f"   测试集: {len(test_idx):,}")
     
-    # 漂移检测
+    # 特征分布漂移检测（训练前）
     if not args.skip_drift:
         drift_threshold = config.get('split', {}).get('drift_threshold', 0.2)
-        run_drift_detection(
+        run_feature_drift_detection(
             features=features,
             train_idx=train_idx,
             valid_idx=valid_idx,
@@ -590,6 +682,7 @@ def main():
     
     # 运行各任务
     all_results = {}
+    all_predictions = {}  # 收集预测结果用于漂移检测
     
     for task_type in task_types:
         try:
@@ -604,10 +697,30 @@ def main():
                 output_dir=output_dir
             )
             all_results[task_type] = result
+            
+            # 加载预测结果用于漂移检测
+            pred_path = os.path.join(output_dir, f'{task_type}_predictions.parquet')
+            if os.path.exists(pred_path):
+                pred_df = pd.read_parquet(pred_path)
+                all_predictions[task_type] = pred_df['score']
+                
         except Exception as e:
             print(f"❌ 任务 {task_type} 失败: {e}")
             import traceback
             traceback.print_exc()
+    
+    # 模型预测漂移检测（训练后）
+    if not args.skip_drift and all_predictions:
+        drift_threshold = config.get('split', {}).get('drift_threshold', 0.2)
+        run_prediction_drift_detection(
+            predictions=all_predictions,
+            forward_returns=forward_returns,
+            train_idx=train_idx,
+            valid_idx=valid_idx,
+            test_idx=test_idx,
+            output_dir=output_dir,
+            drift_threshold=drift_threshold
+        )
     
     # 对比结果
     if len(all_results) > 1:

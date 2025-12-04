@@ -4,22 +4,30 @@
 漂移检测与分割对比模块
 
 功能：
-1. 比较 Train / Valid / Test 集的 IC 和 Spread
-2. 检测漂移（验证 vs 测试差异 < 20%）
-3. 生成漂移报告（JSON + HTML）
-4. 与 CrossSectionAnalyzer 无缝集成
+1. 特征分布漂移检测（PSI）- 检测输入特征分布是否变化
+2. 模型预测漂移检测（IC/Spread）- 检测模型预测能力是否下降
+3. 比较 Train / Valid / Test 集的 IC 和 Spread
+4. 统计检验（KS/t-test/Mann-Whitney U）
+5. 生成漂移报告（JSON + HTML + CSV）
+6. 与 CrossSectionAnalyzer 无缝集成
+
+两种漂移检测的区别：
+- 特征分布漂移（PSI）：训练前检测，发现数据质量/市场环境变化
+- 模型预测漂移（IC/Spread）：训练后检测，验证模型泛化能力
 
 验收标准（来自研究宪章）：
-- 验证 vs 测试：Rank IC、ICIR、分层收益差异 < 20%
+- 特征漂移：PSI < 0.2（显著漂移阈值）
+- 预测漂移：验证 vs 测试 Rank IC、ICIR、分层收益差异 < 20%
 - 统计检验与图形化（分布、时序）
 
 输出目录：
 /ML output/reports/baseline_vX/cv/
-├── drift_report.json        # 漂移检测结果
-├── drift_tearsheet.html     # 可视化报告
-└── split_comparison.csv     # 分割对比详情
+├── feature_drift_report.json    # 特征分布漂移检测结果
+├── prediction_drift_report.json # 模型预测漂移检测结果
+├── drift_tearsheet.html         # 可视化报告
+└── split_comparison.csv         # 分割对比详情
 
-创建: 2025-12-02 | 版本: v1.0
+创建: 2025-12-02 | 版本: v1.1
 """
 
 import os
@@ -66,6 +74,114 @@ class DriftDetector:
         print(f"🔍 漂移检测器初始化")
         print(f"   漂移阈值: {drift_threshold:.0%}")
         print(f"   显著性水平: {significance_level}")
+    
+    def calculate_psi(self, 
+                      expected: pd.Series, 
+                      actual: pd.Series, 
+                      n_bins: int = 10) -> float:
+        """
+        计算 Population Stability Index (PSI)
+        
+        用于检测特征分布漂移：
+        - PSI < 0.1: 分布稳定
+        - 0.1 <= PSI < 0.2: 轻微漂移
+        - PSI >= 0.2: 显著漂移
+        
+        Parameters:
+        -----------
+        expected : pd.Series
+            基准分布（如训练集）
+        actual : pd.Series
+            实际分布（如验证集/测试集）
+        n_bins : int
+            分箱数量
+            
+        Returns:
+        --------
+        float
+            PSI 值
+        """
+        # 移除 NaN
+        expected = expected.dropna()
+        actual = actual.dropna()
+        
+        if len(expected) == 0 or len(actual) == 0:
+            return np.nan
+        
+        # 使用 expected 的分位数作为分箱边界
+        breakpoints = np.percentile(expected, np.linspace(0, 100, n_bins + 1))
+        breakpoints[0] = -np.inf
+        breakpoints[-1] = np.inf
+        
+        # 计算每个箱的占比
+        expected_counts = np.histogram(expected, bins=breakpoints)[0]
+        actual_counts = np.histogram(actual, bins=breakpoints)[0]
+        
+        # 转为比例（添加平滑避免除零）
+        expected_pct = (expected_counts + 1) / (len(expected) + n_bins)
+        actual_pct = (actual_counts + 1) / (len(actual) + n_bins)
+        
+        # 计算 PSI
+        psi = np.sum((actual_pct - expected_pct) * np.log(actual_pct / expected_pct))
+        
+        return psi
+    
+    def detect_feature_drift(self,
+                             train_features: pd.DataFrame,
+                             valid_features: pd.DataFrame,
+                             test_features: pd.DataFrame,
+                             max_features: int = None) -> Dict:
+        """
+        检测特征分布漂移
+        
+        Parameters:
+        -----------
+        train_features, valid_features, test_features : pd.DataFrame
+            各数据集的特征
+        max_features : int, optional
+            最多检测的特征数量，None 表示检测所有
+            
+        Returns:
+        --------
+        Dict
+            漂移检测结果
+        """
+        drift_results = {
+            'train_vs_valid': {},
+            'train_vs_test': {},
+            'drifted_features': []
+        }
+        
+        feature_cols = list(train_features.columns)
+        if max_features is not None:
+            feature_cols = feature_cols[:max_features]
+        
+        drifted = []
+        for col in feature_cols:
+            try:
+                psi_valid = self.calculate_psi(
+                    train_features[col],
+                    valid_features[col]
+                )
+                psi_test = self.calculate_psi(
+                    train_features[col],
+                    test_features[col]
+                )
+                
+                drift_results['train_vs_valid'][col] = float(psi_valid)
+                drift_results['train_vs_test'][col] = float(psi_test)
+                
+                if psi_valid > self.drift_threshold or psi_test > self.drift_threshold:
+                    drifted.append(col)
+                    
+            except Exception:
+                continue
+        
+        drift_results['drifted_features'] = drifted
+        drift_results['n_drifted'] = len(drifted)
+        drift_results['n_checked'] = len(feature_cols)
+        
+        return drift_results
     
     def compare_ic_summaries(self,
                             train_summary: Dict,
