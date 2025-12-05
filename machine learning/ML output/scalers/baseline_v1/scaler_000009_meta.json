@@ -1,0 +1,38 @@
+{
+  "feature_cols": [
+    "rolling_std_30d",
+    "bb_upper",
+    "atr_14",
+    "volume_ma_20",
+    "pct_change",
+    "macd",
+    "kurtosis_20d",
+    "return_20d",
+    "volume_ma_5",
+    "rolling_std_10d",
+    "rsi_14",
+    "return_10d",
+    "price_position_20d",
+    "skewness_20d",
+    "rolling_std_5d",
+    "macd_hist",
+    "volume_roc_10d",
+    "amount",
+    "volume",
+    "open_close_range"
+  ],
+  "scaler_type": "robust",
+  "train_ratio": 0.8,
+  "train_samples": 1332,
+  "total_samples": 1665,
+  "train_range": [
+    "2018-02-26",
+    "2023-08-16"
+  ],
+  "valid_range": [
+    "2023-08-17",
+    "2024-12-31"
+  ],
+  "fit_timestamp": "2025-12-05T10:54:57.720733",
+  "feature_count": 20
+}

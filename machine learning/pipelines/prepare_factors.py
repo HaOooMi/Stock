@@ -442,12 +442,19 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     
     print(f"\n🔍 开始横截面评估 (共 {all_factors_df.shape[1]} 个因子)...\n")
     
-    # 预处理配置 - 使用默认值即可
-    preprocess_config = {
-        'winsorize': True,
-        'standardize': True,
-        'neutralize': False  # 可选: True (需要market_cap/industry)
-    }
+    # 预处理配置 - 从配置文件读取
+    preprocess_config = config['features'].get('preprocessing', {})
+    # 确保有默认值
+    if 'winsorize' not in preprocess_config:
+        preprocess_config['winsorize'] = True
+    if 'standardize' not in preprocess_config:
+        preprocess_config['standardize'] = True
+    if 'neutralize' not in preprocess_config:
+        preprocess_config['neutralize'] = False
+    
+    print(f"   预处理配置: winsorize={preprocess_config['winsorize']}, "
+          f"standardize={preprocess_config['standardize']}, "
+          f"neutralize={preprocess_config['neutralize']}")
     
     for i, factor_name in enumerate(all_factors_df.columns, 1):
         print(f"[{i}/{all_factors_df.shape[1]}] 评估因子: {factor_name}")
@@ -619,16 +626,26 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     print(f"   严格通过: {len(qualified_factors)} / {all_factors_df.shape[1]} ({len(qualified_factors)/all_factors_df.shape[1]*100:.1f}%)")
     print(f"   探索通过: {len(exploratory_factors)} / {all_factors_df.shape[1]} ({len(exploratory_factors)/all_factors_df.shape[1]*100:.1f}%)")
     
-    # 如果严格通过为0，根据配置决定是否自动降级到探索标准
-    if len(qualified_factors) == 0 and len(exploratory_factors) > 0 and AUTO_FALLBACK:
-        print(f"\n⚠️  严格通过因子数为0，自动降级启用 (auto_fallback_to_exploratory: {AUTO_FALLBACK})")
-        print(f"   将使用探索通过的 {len(exploratory_factors)} 个因子继续流程")
+    # ===== 合并严格通过和探索通过的因子 =====
+    # 策略：将探索通过但不在严格通过中的因子也加入，用于排序模型实验
+    # 这样可以有更多因子供模型学习，同时保留质量分级信息
+    original_strict_count = len(qualified_factors)
+    
+    if AUTO_FALLBACK:
+        # 合并探索因子（去重）
+        for factor in exploratory_factors:
+            if factor not in qualified_factors:
+                qualified_factors.append(factor)
+        
+        if len(qualified_factors) > original_strict_count:
+            print(f"\n📊 因子合并: 严格通过 {original_strict_count} + 探索补充 {len(qualified_factors) - original_strict_count} = 共 {len(qualified_factors)} 个因子")
+    
+    # 如果严格通过为0，使用探索因子
+    if original_strict_count == 0 and len(exploratory_factors) > 0:
+        print(f"\n⚠️  严格通过因子数为0，使用探索通过的 {len(exploratory_factors)} 个因子")
         print(f"   这些因子可用于排序模型实验，但建议后续优化因子质量")
-        qualified_factors = exploratory_factors.copy()
-    elif len(qualified_factors) == 0 and len(exploratory_factors) > 0 and not AUTO_FALLBACK:
-        print(f"\n⚠️  严格通过因子数为0，自动降级已禁用 (auto_fallback_to_exploratory: {AUTO_FALLBACK})")
-        print(f"   有 {len(exploratory_factors)} 个因子通过探索标准，但未启用自动降级")
-        print(f"   如需启用，请在配置文件中设置 auto_fallback_to_exploratory: true")
+    elif original_strict_count == 0 and len(exploratory_factors) == 0:
+        print(f"\n❌ 严格和探索都没有通过的因子，请检查因子质量或放宽筛选标准")
     
     # ===== 4.5 保存完整的因子体检报告 =====
     print("\n" + "-" * 60)
@@ -1047,15 +1064,62 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     datasets_dir = os.path.join(ml_root, "ML output/datasets/baseline_v1")
     os.makedirs(datasets_dir, exist_ok=True)
     
-    # 保存Parquet格式
+    # 保存原始因子 (Parquet格式)
     output_path = os.path.join(datasets_dir, f"qualified_factors_{datetime.now().strftime('%Y%m%d')}.parquet")
     qualified_factors_df.to_parquet(output_path)
-    print(f"   ✅ 因子数据 (Parquet): {output_path}")
+    print(f"   ✅ 原始因子 (Parquet): {output_path}")
     
     # 同时保存CSV格式（兼容性）
     csv_path = os.path.join(datasets_dir, f"qualified_factors_{datetime.now().strftime('%Y%m%d')}.csv")
     qualified_factors_df.to_csv(csv_path)
-    print(f"   ✅ 因子数据 (CSV): {csv_path}")
+    print(f"   ✅ 原始因子 (CSV): {csv_path}")
+    
+    # ===== 保存中性化后的因子（如果启用了中性化）=====
+    print(f"\n📊 中性化状态检查:")
+    print(f"   neutralize 配置: {preprocess_config.get('neutralize', False)}")
+    print(f"   market_cap 数据: {'有' if market_cap is not None else '无'}")
+    print(f"   industry 数据: {'有' if industry is not None else '无'}")
+    
+    # 检查 market_cap 是否全为 NaN
+    if market_cap is not None:
+        valid_mc = market_cap['market_cap'].notna().sum()
+        print(f"   market_cap 有效值: {valid_mc}/{len(market_cap)}")
+        if valid_mc == 0:
+            print(f"   ⚠️  market_cap 全为 NaN，将仅使用行业中性化")
+            market_cap = None
+    
+    # 检查 industry 是否有效
+    if industry is not None:
+        valid_ind = industry['industry'].notna().sum()
+        print(f"   industry 有效值: {valid_ind}/{len(industry)}")
+        if valid_ind == 0:
+            print(f"   ⚠️  industry 全为 NaN，无法进行行业中性化")
+            industry = None
+    
+    if preprocess_config.get('neutralize', False) and (market_cap is not None or industry is not None):
+        print(f"\n💾 保存中性化因子...")
+        
+        from evaluation.factor_preprocessing import preprocess_factor_pipeline
+        
+        # 对所有合格因子进行中性化
+        neutralized_factors_df = preprocess_factor_pipeline(
+            factors=qualified_factors_df,
+            market_cap=market_cap,
+            industry=industry,
+            winsorize=True,
+            standardize=True,
+            neutralize=True
+        )
+        
+        # 保存中性化因子 (Parquet格式)
+        neutral_output_path = os.path.join(datasets_dir, f"qualified_factors_neutralized_{datetime.now().strftime('%Y%m%d')}.parquet")
+        neutralized_factors_df.to_parquet(neutral_output_path)
+        print(f"   ✅ 中性化因子 (Parquet): {neutral_output_path}")
+        
+        # CSV格式
+        neutral_csv_path = os.path.join(datasets_dir, f"qualified_factors_neutralized_{datetime.now().strftime('%Y%m%d')}.csv")
+        neutralized_factors_df.to_csv(neutral_csv_path)
+        print(f"   ✅ 中性化因子 (CSV): {neutral_csv_path}")
     
     # 保存final_feature_list.txt
     feature_list_path = os.path.join(ml_root, "ML output/final_feature_list.txt")

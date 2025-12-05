@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-12-05T10:55:50.245942",
+  "total_samples": 1665,
+  "checks": {
+    "missing_ratio": {
+      "max": 0.003003003003003003,
+      "mean": 0.000143000143000143,
+      "columns_with_missing": {
+        "future_return_5d": 0.003003003003003003
+      },
+      "red_flag": false
+    },
+    "extreme_values": {
+      "max": 0.02042042042042042,
+      "mean": 0.019676819676819675
+    },
+    "duplicates": {
+      "count": 0,
+      "ratio": 0.0,
+      "red_flag": false
+    },
+    "suspended": {
+      "count": 0,
+      "ratio": 0.0
+    },
+    "limit_moves": {
+      "limit_up": 687,
+      "limit_down": 793,
+      "total": 1480,
+      "ratio": 0.8888888888888888
+    },
+    "time_continuity": {
+      "n_dates": 1665,
+      "max_gap_days": 11,
+      "date_range": "2018-02-26 ~ 2024-12-31",
+      "red_flag": false
+    }
+  },
+  "overall_quality": "PASS",
+  "red_flags_count": 0
+}

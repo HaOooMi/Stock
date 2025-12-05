@@ -3,12 +3,12 @@
     "formula": "mean(turnover, 5)",
     "family": "量价微结构",
     "reference": "Datar, Naik and Radcliffe (1998)",
-    "added_date": "2025-12-02T09:54:07.607730",
+    "added_date": "2025-12-05T11:27:48.948160",
     "quality_report": {
-      "ic_mean": -0.03332970688192218,
-      "icir_annual": -3.235655737182157,
-      "psi": 0.015474685803127105,
-      "ic_half_life": 2.0,
+      "ic_mean": -0.02523909377508179,
+      "icir_annual": -2.767893092646493,
+      "psi": 0.39734745581765046,
+      "ic_half_life": 20,
       "max_corr": 0.3569699312165675
     },
     "status": "active",
@@ -18,12 +18,12 @@
     "formula": "turnover_t / turnover_{t-5} - 1",
     "family": "量价微结构",
     "reference": "Datar, Naik and Radcliffe (1998)",
-    "added_date": "2025-12-02T09:54:07.609276",
+    "added_date": "2025-12-05T11:27:48.950166",
     "quality_report": {
-      "ic_mean": -0.06444675707345619,
-      "icir_annual": -5.296743695665404,
-      "psi": 0.028190987371525048,
-      "ic_half_life": 4.0,
+      "ic_mean": -0.04137291566919471,
+      "icir_annual": -4.264383411302123,
+      "psi": 0.3370364976710413,
+      "ic_half_life": 15.0,
       "max_corr": 0.16529550265130935
     },
     "status": "active",
@@ -33,13 +33,88 @@
     "formula": "turnover_t / turnover_{t-20} - 1",
     "family": "量价微结构",
     "reference": "Datar, Naik and Radcliffe (1998)",
-    "added_date": "2025-12-02T09:54:07.624125",
+    "added_date": "2025-12-05T11:27:48.964637",
     "quality_report": {
-      "ic_mean": -0.0589646979797147,
-      "icir_annual": -5.2256457681286905,
-      "psi": 0.004824210074877455,
-      "ic_half_life": 3.0,
+      "ic_mean": -0.0339950915141614,
+      "icir_annual": -3.373578920586494,
+      "psi": 0.18540802418261948,
+      "ic_half_life": 5.0,
       "max_corr": 0.23032884098283096
+    },
+    "status": "active",
+    "version": 1
+  },
+  "roc_10d": {
+    "formula": "(close_t - close_{t-10}) / close_{t-10}",
+    "family": "动量/反转",
+    "reference": "Jegadeesh and Titman (1993)",
+    "added_date": "2025-12-05T11:27:48.976952",
+    "quality_report": {
+      "ic_mean": -0.008036831269582217,
+      "icir_annual": -0.8526749640781518,
+      "psi": 0.05979192407995462,
+      "ic_half_life": 20,
+      "max_corr": 0.0
+    },
+    "status": "active",
+    "version": 1
+  },
+  "roc_60d": {
+    "formula": "(close_t - close_{t-60}) / close_{t-60}",
+    "family": "动量/反转",
+    "reference": "Jegadeesh and Titman (1993)",
+    "added_date": "2025-12-05T11:27:48.990412",
+    "quality_report": {
+      "ic_mean": -0.013695158275682103,
+      "icir_annual": -1.4421703692424392,
+      "psi": 0.14738543564702988,
+      "ic_half_life": 20,
+      "max_corr": 0.7513260857526147
+    },
+    "status": "active",
+    "version": 1
+  },
+  "price_to_sma_10d": {
+    "formula": "(close - SMA_10) / SMA_10",
+    "family": "动量/反转",
+    "reference": "Fama and French (1996)",
+    "added_date": "2025-12-05T11:27:49.003855",
+    "quality_report": {
+      "ic_mean": -0.009408801974774266,
+      "icir_annual": -1.0651006966613492,
+      "psi": 0.2607534908192449,
+      "ic_half_life": 6.0,
+      "max_corr": 0.7694528929037063
+    },
+    "status": "active",
+    "version": 1
+  },
+  "realized_vol_60d": {
+    "formula": "std(returns, 60)",
+    "family": "波动率",
+    "reference": "French, Schwert and Stambaugh (1987)",
+    "added_date": "2025-12-05T11:27:49.016254",
+    "quality_report": {
+      "ic_mean": -0.006425807166514531,
+      "icir_annual": -0.6988322286006476,
+      "psi": 0.7499875145549237,
+      "ic_half_life": 3.0,
+      "max_corr": 0.14318074341733025
+    },
+    "status": "active",
+    "version": 1
+  },
+  "parkinson_vol_20d": {
+    "formula": "sqrt(mean((ln(H/L))^2) / (4*ln(2)))",
+    "family": "波动率",
+    "reference": "Parkinson (1980)",
+    "added_date": "2025-12-05T11:27:49.030478",
+    "quality_report": {
+      "ic_mean": -0.007034781439190155,
+      "icir_annual": -0.7969022607834717,
+      "psi": 0.004786542496434083,
+      "ic_half_life": 3.0,
+      "max_corr": 0.05055915442972715
     },
     "status": "active",
     "version": 1
@@ -48,12 +123,12 @@
     "formula": "mean((high - low) / close, 5)",
     "family": "风格/质量",
     "reference": "Alizadeh, Brandt and Diebold (2002)",
-    "added_date": "2025-12-02T09:54:07.634574",
+    "added_date": "2025-12-05T11:27:49.044418",
     "quality_report": {
-      "ic_mean": -0.03898627378473397,
-      "icir_annual": -3.6106865247922055,
-      "psi": 0.002776748031652995,
-      "ic_half_life": 20,
+      "ic_mean": -0.019066679929445815,
+      "icir_annual": -2.0872715490351754,
+      "psi": 0.0881937962209048,
+      "ic_half_life": 11.0,
       "max_corr": 0.7556605264710983
     },
     "status": "active",

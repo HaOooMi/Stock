@@ -93,12 +93,17 @@ data:
 # ===================== 特征配置 =====================
 features:
   # 特征文件路径（从feature_engineering生成）
-  use_scaled_features: true  # 使用标准化后的特征
+  use_scaled_features: false  # 使用原始特征（true 需要先运行特征标准化管道）
+  use_neutralized_features: true  # 使用中性化因子（需要先运行prepare_factors.py且开启neutralize）
   
   # 特征预处理
   preprocessing:
     winsorize_quantile: [0.01, 0.99]  # 去极值分位数
     fillna_method: "forward"           # 缺失值填充方法
+    standardize: true                  # 横截面标准化（Z-Score）
+    neutralize: true                    # 因子中性化（需要market_cap/industry数据）
+    neutralize_market_cap: true        # 市值中性化
+    neutralize_industry: true          # 行业中性化
     
   # 因子工厂配置（因子库与稳健筛选）
   factor_factory:
@@ -218,7 +223,7 @@ split:
   embargo_days: 5            # 禁止期天数（建议 target_horizon / 2）
   
   # 交叉验证模式
-  cv_mode: "single_split"    # 模式：'single_split' 或 'walk_forward'
+  cv_mode: "walk_forward"    # 模式：'single_split' 或 'walk_forward'（推荐walk_forward减少过拟合）
   
   # Walk-Forward 验证（当 cv_mode = 'walk_forward' 时生效）
   walk_forward:
@@ -227,7 +232,7 @@ split:
     expanding: true          # 扩张窗口（true）vs 滚动窗口（false）
   
   # 漂移检测阈值
-  drift_threshold: 0.2       # Valid vs Test 差异阈值（20%）
+  drift_threshold: 0.3       # Valid vs Test 差异阈值（30%，放宽以适应小样本）
   
 # ===================== 模型配置 =====================
 models:
@@ -255,16 +260,16 @@ models:
   lightgbm:
     enabled: true  # 如果安装失败会自动跳过
     params:
-      n_estimators: 500
-      learning_rate: 0.05
-      num_leaves: 31
-      max_depth: 8
-      min_data_in_leaf: 20
-      feature_fraction: 0.8
-      bagging_fraction: 0.8
+      n_estimators: 300          # 减少树数量防止过拟合
+      learning_rate: 0.03        # 降低学习率增强稳定性
+      num_leaves: 15             # 减少叶子数降低复杂度
+      max_depth: 5               # 限制深度
+      min_data_in_leaf: 50       # 增加叶子最小样本数
+      feature_fraction: 0.6      # 降低特征采样比例
+      bagging_fraction: 0.7      # 降低样本采样比例
       bagging_freq: 5
-      lambda_l1: 0.1
-      lambda_l2: 0.1
+      lambda_l1: 0.5             # 增强L1正则化
+      lambda_l2: 1.0             # 增强L2正则化
       random_state: 42
       verbose: -1
   

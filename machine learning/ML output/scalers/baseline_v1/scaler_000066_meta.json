@@ -1,0 +1,38 @@
+{
+  "feature_cols": [
+    "bb_upper",
+    "skewness_20d",
+    "atr_14",
+    "return_20d",
+    "rolling_std_30d",
+    "volume_ma_20",
+    "kurtosis_20d",
+    "macd",
+    "volume_ma_5",
+    "pct_change",
+    "rsi_14",
+    "rolling_std_10d",
+    "macd_hist",
+    "amount",
+    "return_10d",
+    "volume_roc_5d",
+    "rolling_std_5d",
+    "volume_ratio_20d",
+    "volume_roc_10d",
+    "volume_roc_3d"
+  ],
+  "scaler_type": "robust",
+  "train_ratio": 0.8,
+  "train_samples": 1332,
+  "total_samples": 1665,
+  "train_range": [
+    "2018-02-26",
+    "2023-08-16"
+  ],
+  "valid_range": [
+    "2023-08-17",
+    "2024-12-31"
+  ],
+  "fit_timestamp": "2025-12-05T10:55:47.359369",
+  "feature_count": 20
+}

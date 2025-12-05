@@ -1,4 +1,9 @@
 turnover_mean_5d
 turnover_roc_5d
 turnover_roc_20d
+roc_10d
+roc_60d
+price_to_sma_10d
+realized_vol_60d
+parkinson_vol_20d
 hl_range_mean_5d

@@ -1,0 +1,46 @@
+{
+  "timestamp": "2025-12-05T11:20:06.431183",
+  "total_samples": 76609,
+  "checks": {
+    "missing_ratio": {
+      "max": 0.006539701601639494,
+      "mean": 0.00036331675564663855,
+      "columns_with_missing": {
+        "market_cap": 0.006539701601639494
+      },
+      "red_flag": false
+    },
+    "extreme_values": {
+      "max": 0.020023756999830306,
+      "mean": 0.014540502203831575
+    },
+    "duplicates": {
+      "count": 0,
+      "ratio": 0.0,
+      "red_flag": false
+    },
+    "tradable_samples": {
+      "count": 74378,
+      "ratio": 0.9708780952629587,
+      "red_flag": false
+    },
+    "suspended": {
+      "count": 0,
+      "ratio": 0.0
+    },
+    "limit_moves": {
+      "limit_up": 35692,
+      "limit_down": 37294,
+      "total": 72986,
+      "ratio": 0.9527079063817567
+    },
+    "time_continuity": {
+      "n_dates": 1698,
+      "max_gap_days": 11,
+      "date_range": "2018-01-02 ~ 2024-12-30",
+      "red_flag": false
+    }
+  },
+  "overall_quality": "PASS",
+  "red_flags_count": 0
+}

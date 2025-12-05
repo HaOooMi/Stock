@@ -154,7 +154,8 @@ class DataLoader:
     def load_features_and_targets(self, 
                                   symbol: str,
                                   target_col: str = 'future_return_5d',
-                                  use_scaled: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
+                                  use_scaled: bool = True,
+                                  use_neutralized: bool = False) -> Tuple[pd.DataFrame, pd.Series]:
         """
         加载特征和目标数据（从ML output目录）
         
@@ -166,6 +167,8 @@ class DataLoader:
             目标列名
         use_scaled : bool
             是否使用标准化后的特征
+        use_neutralized : bool
+            是否使用中性化后的因子（优先级高于use_scaled）
             
         Returns:
         --------
@@ -181,37 +184,60 @@ class DataLoader:
             ml_output_root = self.data_root
         
         # 1. 加载特征数据
-        if use_scaled:
-            # 标准化特征在 scalers/baseline_v1 目录
-            scalers_dir = os.path.join(ml_output_root, 'scalers', 'baseline_v1')
-            feature_pattern = f"scaler_{symbol}_scaled_features.csv"
+        # 优先级：use_neutralized > use_scaled > 原始特征
+        if use_neutralized:
+            # 中性化因子在 datasets/baseline_v1 目录
+            datasets_dir = os.path.join(ml_output_root, 'datasets', 'baseline_v1')
             
-            if not os.path.exists(scalers_dir):
-                raise FileNotFoundError(f"标准化器目录不存在: {scalers_dir}")
+            if not os.path.exists(datasets_dir):
+                raise FileNotFoundError(f"数据集目录不存在: {datasets_dir}")
             
-            feature_files = [f for f in os.listdir(scalers_dir) 
-                           if f == feature_pattern]
+            # 查找中性化因子文件（格式：qualified_factors_neutralized_YYYYMMDD.parquet）
+            neutral_files = [f for f in os.listdir(datasets_dir) 
+                           if f.startswith('qualified_factors_neutralized_') and f.endswith('.parquet')]
             
-            if not feature_files:
-                raise FileNotFoundError(f"未找到标准化特征文件: {feature_pattern} (目录: {scalers_dir})")
-            
-            feature_file = os.path.join(scalers_dir, feature_files[0])
-            print(f"   📈 加载标准化特征: {feature_files[0]}")
-        else:
-            # 从with_targets文件加载
-            target_pattern = f"with_targets_{symbol}_complete_*.csv"
-            target_files = [f for f in os.listdir(self.data_root) if f.startswith(f"with_targets_{symbol}")]
-            
-            if not target_files:
-                raise FileNotFoundError(f"未找到目标文件: {target_pattern}")
-            
-            # 使用最新的文件
-            target_files.sort(reverse=True)
-            feature_file = os.path.join(self.data_root, target_files[0])
-            print(f"   📈 加载特征: {target_files[0]}")
+            if not neutral_files:
+                print(f"   ⚠️ 未找到中性化因子文件，降级使用原始因子")
+                use_neutralized = False
+            else:
+                # 使用最新的文件
+                neutral_files.sort(reverse=True)
+                feature_file = os.path.join(datasets_dir, neutral_files[0])
+                print(f"   📈 加载中性化因子: {neutral_files[0]}")
+                features_df = pd.read_parquet(feature_file)
         
-        # 加载特征数据
-        features_df = pd.read_csv(feature_file, index_col=0, parse_dates=True, encoding='utf-8')
+        if not use_neutralized:
+            if use_scaled:
+                # 标准化特征在 scalers/baseline_v1 目录
+                scalers_dir = os.path.join(ml_output_root, 'scalers', 'baseline_v1')
+                feature_pattern = f"scaler_{symbol}_scaled_features.csv"
+                
+                if not os.path.exists(scalers_dir):
+                    raise FileNotFoundError(f"标准化器目录不存在: {scalers_dir}")
+                
+                feature_files = [f for f in os.listdir(scalers_dir) 
+                               if f == feature_pattern]
+                
+                if not feature_files:
+                    raise FileNotFoundError(f"未找到标准化特征文件: {feature_pattern} (目录: {scalers_dir})")
+                
+                feature_file = os.path.join(scalers_dir, feature_files[0])
+                print(f"   📈 加载标准化特征: {feature_files[0]}")
+            else:
+                # 从with_targets文件加载
+                target_pattern = f"with_targets_{symbol}_complete_*.csv"
+                target_files = [f for f in os.listdir(self.data_root) if f.startswith(f"with_targets_{symbol}")]
+                
+                if not target_files:
+                    raise FileNotFoundError(f"未找到目标文件: {target_pattern}")
+                
+                # 使用最新的文件
+                target_files.sort(reverse=True)
+                feature_file = os.path.join(self.data_root, target_files[0])
+                print(f"   📈 加载特征: {target_files[0]}")
+            
+            # 加载特征数据
+            features_df = pd.read_csv(feature_file, index_col=0, parse_dates=True, encoding='utf-8')
         
         # 2. 加载目标数据（从 datasets 目录）
         target_pattern = f"with_targets_{symbol}_complete_*.csv"
@@ -270,10 +296,22 @@ class DataLoader:
             else:
                 print(f"      缺失TOP5: {dict(high_nan_cols.head(5))}")
         
-        # 修改过滤逻辑：仅删除特征行有NaN的样本，保留目标NaN（特别是尾部）
-        valid_mask = ~features_multi.isna().any(axis=1)
+        # 修改过滤逻辑：只过滤核心特征（排除财务特征 fin_*）的缺失
+        # 财务特征缺失是正常的（季度更新），不应该因此删除整行
+        core_feature_cols = [col for col in feature_cols if not col.startswith('fin_')]
+        fin_feature_cols = [col for col in feature_cols if col.startswith('fin_')]
+        
+        if core_feature_cols:
+            valid_mask = ~features_multi[core_feature_cols].isna().any(axis=1)
+        else:
+            valid_mask = pd.Series(True, index=features_multi.index)
+        
         features_clean = features_multi[valid_mask]
         targets_clean = targets_multi[valid_mask]
+        
+        # 财务特征使用前向填充（季度数据特性）
+        if fin_feature_cols and len(features_clean) > 0:
+            features_clean[fin_feature_cols] = features_clean[fin_feature_cols].ffill()
         
         # 再次检查目标尾部NaN（确认保留）
         tail_target_nans_after = targets_clean.tail(10).isna().sum()

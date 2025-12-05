@@ -1,0 +1,38 @@
+{
+  "task_type": "regression",
+  "train_samples": 43511,
+  "valid_samples": 14968,
+  "test_samples": 15167,
+  "training_result": {
+    "model_name": "LightGBM",
+    "training_time": 0.08940720558166504,
+    "train_samples": 43511,
+    "train_mse": 0.004855287708523109,
+    "train_mae": 0.047057751570273275,
+    "n_features": 9,
+    "n_estimators": 25,
+    "best_iteration": 25,
+    "valid_samples": 14968,
+    "valid_mse": 0.004194060962273791,
+    "valid_mae": 0.043180084093460656
+  },
+  "ic_summary": {
+    "('model_score', 'ret_5d')": {
+      "mean": 0.06736579141929788,
+      "std": 0.17369108613934808,
+      "icir": 0.38784829386841396,
+      "icir_annual": 6.156900791979125,
+      "t_stat": 7.0027832675632995,
+      "p_value": 1.447142908840776e-11,
+      "n_obs": 326,
+      "positive_ratio": 0.6288343558282209
+    }
+  },
+  "spreads": {
+    "('model_score', 'ret_5d')": {
+      "mean": 0.004640805481847127,
+      "std": 0.01885677973177039,
+      "sharpe": 0.24610806022346315
+    }
+  }
+}

@@ -294,3 +294,152 @@ def get_now_data(query_api: QueryApi, codes: List[str]) -> pd.DataFrame:
     except Exception as e:
         print(f"InfluxDB realtime query failed: {e}")
         return pd.DataFrame()
+
+
+# ==================== 历史市值数据 ====================
+
+def fetch_history_valuation_data(client, measurement_name: str = "history_valuation"):
+    """
+    从百度股市通获取所有A股的历史市值数据，存储到 InfluxDB
+    
+    数据来源：ak.stock_zh_valuation_baidu(symbol, indicator="总市值", period="全部")
+    
+    存储结构：
+    - Measurement: history_valuation
+    - Tags: 股票代码, 股票名称
+    - Fields: 总市值 (单位: 元)
+    - Time: 交易日期
+    
+    Parameters:
+    -----------
+    client : InfluxDBClient
+        InfluxDB 客户端
+    measurement_name : str
+        measurement 名称，默认 "history_valuation"
+    """
+    try:
+        stock_list_df = ak.stock_info_a_code_name()
+        print(f"成功获取 {len(stock_list_df)} 只A股股票列表。")
+    except Exception as e:
+        print(f"获取A股列表失败: {e}")
+        return
+    
+    success_count = 0
+    fail_count = 0
+    
+    for index, row in stock_list_df.iterrows():
+        stock_code = row["code"]
+        stock_name = row["name"]
+        print(f"--- [{index+1}/{len(stock_list_df)}] 正在处理历史市值: {stock_name} ({stock_code}) ---")
+        
+        max_retries = 3
+        retry_count = 0
+        success = False
+        
+        while retry_count < max_retries and not success:
+            try:
+                # 从百度股市通获取历史总市值
+                valuation_df = ak.stock_zh_valuation_baidu(
+                    symbol=stock_code, 
+                    indicator="总市值", 
+                    period="全部"
+                )
+                
+                if valuation_df is None or valuation_df.empty:
+                    print(f"  -> 未找到 {stock_name} ({stock_code}) 的历史市值数据,跳过。")
+                    fail_count += 1
+                    break
+                
+                points = []
+                for _, val_row in valuation_df.iterrows():
+                    # 百度返回的市值单位是「亿元」，转换为「元」
+                    market_cap = float(val_row["value"]) * 1e8
+                    
+                    p = Point(measurement_name) \
+                        .tag("股票代码", stock_code) \
+                        .tag("股票名称", stock_name) \
+                        .field("总市值", market_cap) \
+                        .time(pd.to_datetime(val_row["date"]))
+                    points.append(p)
+                
+                write_api = client.write_api(
+                    write_options=WriteOptions(
+                        batch_size=5000,
+                        flush_interval=10_000,
+                        jitter_interval=2_000,
+                        retry_interval=5_000,
+                    )
+                )
+                write_api.write(bucket="stock_kdata", org="stock", record=points)
+                print(f"  -> 成功写入 {len(points)} 条 {stock_name} ({stock_code}) 的历史市值数据。")
+                
+                success = True
+                success_count += 1
+                time.sleep(0.5)  # 限速，避免请求过快
+                
+            except KeyboardInterrupt:
+                print("\n程序被用户中断。正在关闭...")
+                print(f"已完成: {success_count} 只, 失败: {fail_count} 只")
+                return
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = retry_count * 2
+                    print(f"  -> 处理 {stock_name} ({stock_code}) 时发生错误: {e}")
+                    print(f"  -> 等待 {wait_time} 秒后重试 (第 {retry_count}/{max_retries} 次)...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"  -> 处理 {stock_name} ({stock_code}) 失败，已达最大重试次数，跳过。")
+                    print(f"     错误信息: {e}")
+                    fail_count += 1
+    
+    print(f"\n=== 历史市值数据爬取完成 ===")
+    print(f"成功: {success_count} 只, 失败: {fail_count} 只")
+
+
+def get_history_valuation(query_api: QueryApi, symbol: str, start: str, stop: str) -> pd.DataFrame:
+    """
+    从 InfluxDB 查询历史市值数据
+    
+    Parameters:
+    -----------
+    query_api : QueryApi
+        InfluxDB 查询 API
+    symbol : str
+        股票代码
+    start : str
+        开始日期 (YYYY-MM-DD)
+    stop : str
+        结束日期 (YYYY-MM-DD)
+        
+    Returns:
+    --------
+    pd.DataFrame
+        包含日期和总市值的 DataFrame
+    """
+    flux_query = f'''
+        from(bucket: "stock_kdata")
+          |> range(start: {start}, stop: {stop})
+          |> filter(fn: (r) => r._measurement == "history_valuation")
+          |> filter(fn: (r) => r.股票代码 == "{symbol}")
+          |> pivot(
+              rowKey:["_time"],
+              columnKey: ["_field"],
+              valueColumn: "_value"
+          )
+          |> keep(columns: ["_time", "总市值"])
+          |> rename(columns: {{_time: "日期"}})
+    '''
+    try:
+        df = query_api.query_data_frame(query=flux_query)
+        if not df.empty:
+            # 处理时区
+            if pd.api.types.is_datetime64_any_dtype(df['日期']):
+                if df['日期'].dt.tz is not None:
+                    df['日期'] = df['日期'].dt.tz_localize(None)
+            return df
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        print(f"InfluxDB valuation query failed for {symbol}: {e}")
+        return pd.DataFrame()

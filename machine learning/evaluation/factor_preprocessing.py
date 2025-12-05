@@ -229,9 +229,12 @@ def neutralize_factor(factors: pd.DataFrame,
                 ind_dummies = pd.get_dummies(
                     ind_values,
                     prefix='ind',
-                    drop_first=True
+                    drop_first=True,
+                    dtype=float  # 确保是 float 类型
                 )
                 
+                # 确保索引对齐
+                ind_dummies.index = reg_data.index
                 reg_data = reg_data.join(ind_dummies)
             
             # 移除缺失值
@@ -246,8 +249,8 @@ def neutralize_factor(factors: pd.DataFrame,
             if len(X_cols) == 0:
                 continue
             
-            X = reg_data[X_cols].values
-            y = reg_data['factor'].values
+            X = reg_data[X_cols].values.astype(float)
+            y = reg_data['factor'].values.astype(float)
             
             # 添加截距项
             if add_constant:

@@ -1,0 +1,69 @@
+{
+  "snapshot_id": "ds_2025Q4_v4",
+  "created_at": "2025-12-05T11:20:06.425599",
+  "version": "1.0",
+  "data_sources": [],
+  "filters": {
+    "min_volume": 2000,
+    "min_amount": 10000000,
+    "min_price": 1.0,
+    "exclude_st": true,
+    "tradable_ratio": 97.08780952629587
+  },
+  "quality_checks": {
+    "timestamp": "2025-12-05T11:20:06.431183",
+    "total_samples": 76609,
+    "checks": {
+      "missing_ratio": {
+        "max": 0.006539701601639494,
+        "mean": 0.00036331675564663855,
+        "columns_with_missing": {
+          "market_cap": 0.006539701601639494
+        },
+        "red_flag": false
+      },
+      "extreme_values": {
+        "max": 0.020023756999830306,
+        "mean": 0.014540502203831575
+      },
+      "duplicates": {
+        "count": 0,
+        "ratio": 0.0,
+        "red_flag": false
+      },
+      "tradable_samples": {
+        "count": 74378,
+        "ratio": 0.9708780952629587,
+        "red_flag": false
+      },
+      "suspended": {
+        "count": 0,
+        "ratio": 0.0
+      },
+      "limit_moves": {
+        "limit_up": 35692,
+        "limit_down": 37294,
+        "total": 72986,
+        "ratio": 0.9527079063817567
+      },
+      "time_continuity": {
+        "n_dates": 1698,
+        "max_gap_days": 11,
+        "date_range": "2018-01-02 ~ 2024-12-30",
+        "red_flag": false
+      }
+    },
+    "overall_quality": "PASS",
+    "red_flags_count": 0
+  },
+  "statistics": {},
+  "symbol": "000001_000002_000004_etc50",
+  "start_date": "2018-01-01",
+  "end_date": "2024-12-31",
+  "random_seed": 42,
+  "n_samples": 76609,
+  "n_features": 18,
+  "data_hash": "0ff9a0846c053308c2765898ee25c048",
+  "data_file": "d:\\vscode projects\\stock\\machine learning\\ML output\\snapshots\\ds_2025Q4_v4\\000001_000002_000004_etc50_data.parquet",
+  "data_format": "parquet"
+}

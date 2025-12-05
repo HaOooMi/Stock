@@ -98,13 +98,102 @@ def prepare_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
     forward_periods = target_config['forward_periods']
     target_col = f"future_return_{forward_periods}d"
     
+    # 检查是否使用中性化因子
+    use_neutralized = config['features'].get('use_neutralized_features', False)
+    
+    if use_neutralized:
+        # ===== 直接加载中性化因子文件（已经是多股票合并的） =====
+        print("📂 加载中性化因子...")
+        
+        datasets_dir = os.path.join(ml_root, "ML output/datasets/baseline_v1")
+        
+        # 查找中性化因子文件
+        neutral_files = [f for f in os.listdir(datasets_dir) 
+                        if f.startswith('qualified_factors_neutralized_') and f.endswith('.parquet')]
+        
+        if not neutral_files:
+            print("   ⚠️ 未找到中性化因子文件，降级使用原始因子")
+            use_neutralized = False
+        else:
+            neutral_files.sort(reverse=True)
+            neutral_file = os.path.join(datasets_dir, neutral_files[0])
+            print(f"   📈 加载: {neutral_files[0]}")
+            
+            features = pd.read_parquet(neutral_file)
+            print(f"   ✅ 特征形状: {features.shape}")
+            
+            # 加载对应的目标数据（从 with_targets 文件）
+            # 中性化因子的索引应该是 MultiIndex [date, ticker]
+            if isinstance(features.index, pd.MultiIndex):
+                # 从索引中提取股票列表
+                available_tickers = features.index.get_level_values('ticker').unique().tolist()
+                print(f"   📋 包含股票: {available_tickers[:5]}{'...' if len(available_tickers) > 5 else ''}")
+                
+                # 加载目标数据
+                all_targets = []
+                for ticker in available_tickers:
+                    # 查找匹配的 with_targets 文件（格式: with_targets_{ticker}_complete_YYYYMMDD_HHMMSS.csv）
+                    target_files = [f for f in os.listdir(datasets_dir) 
+                                   if f.startswith(f"with_targets_{ticker}_complete_") and f.endswith('.csv')]
+                    
+                    if target_files:
+                        # 使用最新的文件
+                        target_files.sort(reverse=True)
+                        target_file = os.path.join(datasets_dir, target_files[0])
+                        
+                        df = pd.read_csv(target_file, index_col=0, parse_dates=True)
+                        if target_col in df.columns:
+                            targets = df[[target_col]].copy()
+                            targets['ticker'] = ticker
+                            targets = targets.reset_index()
+                            targets = targets.rename(columns={'index': 'date'})
+                            all_targets.append(targets)
+                
+                if all_targets:
+                    targets_df = pd.concat(all_targets, ignore_index=True)
+                    
+                    # 确保日期格式统一（去除时区信息）
+                    targets_df['date'] = pd.to_datetime(targets_df['date']).dt.tz_localize(None)
+                    
+                    targets_df = targets_df.set_index(['date', 'ticker'])
+                    forward_returns = targets_df[[target_col]].rename(columns={target_col: f'ret_{forward_periods}d'})
+                    
+                    # 确保特征索引也无时区
+                    if features.index.get_level_values('date').tz is not None:
+                        features = features.reset_index()
+                        features['date'] = features['date'].dt.tz_localize(None)
+                        features = features.set_index(['date', 'ticker'])
+                    
+                    # 对齐特征和目标
+                    common_idx = features.index.intersection(forward_returns.index)
+                    print(f"   📊 共同索引数: {len(common_idx)}")
+                    
+                    if len(common_idx) == 0:
+                        raise ValueError("特征和目标没有共同索引，请检查日期格式")
+                    
+                    features = features.loc[common_idx]
+                    forward_returns = forward_returns.loc[common_idx]
+                else:
+                    raise FileNotFoundError("无法加载目标数据")
+            else:
+                raise ValueError("中性化因子文件索引格式错误，应为 MultiIndex [date, ticker]")
+            
+            print(f"✅ 特征加载完成: {features.shape}")
+            print(f"✅ 目标加载完成: {len(forward_returns)}")
+            print(f"✅ 样本总数: {len(features):,}")
+            
+            return features, forward_returns, None
+    
+    # ===== 原有逻辑：按单股票加载 =====
     # 初始化数据加载器
-    # 注意：influxdb_config 需要移除 'enabled' 字段
     influxdb_config = data_config.get('influxdb', {}).copy()
-    influxdb_config.pop('enabled', None)  # 移除 enabled 字段
+    influxdb_config.pop('enabled', None)
+    
+    # 数据集目录（with_targets 文件在这里）
+    datasets_dir = os.path.join(ml_root, config['paths'].get('datasets_dir', 'ML output/datasets/baseline_v1'))
     
     loader = DataLoader(
-        data_root=config['paths']['data_root'],
+        data_root=datasets_dir,  # 使用 datasets 目录
         enable_snapshot=data_config['snapshot']['enabled'],
         enable_filtering=True,
         enable_influxdb=data_config['influxdb']['enabled'],
@@ -121,7 +210,8 @@ def prepare_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
             features, targets = loader.load_features_and_targets(
                 symbol=symbol,
                 target_col=target_col,
-                use_scaled=config['features']['use_scaled_features']
+                use_scaled=config['features']['use_scaled_features'],
+                use_neutralized=False  # 这里不再使用中性化，因为上面已经处理
             )
             all_features.append(features)
             all_targets.append(targets)
@@ -588,7 +678,9 @@ def run_prediction_drift_detection(predictions: Dict[str, pd.Series],
     
     # 转换为可序列化格式
     def convert_to_native(obj):
-        if isinstance(obj, np.integer):
+        if isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        elif isinstance(obj, np.integer):
             return int(obj)
         elif isinstance(obj, np.floating):
             return float(obj)
@@ -596,6 +688,8 @@ def run_prediction_drift_detection(predictions: Dict[str, pd.Series],
             return obj.tolist()
         elif isinstance(obj, pd.Series):
             return obj.to_dict()
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
         elif isinstance(obj, dict):
             return {k: convert_to_native(v) for k, v in obj.items()}
         elif isinstance(obj, list):

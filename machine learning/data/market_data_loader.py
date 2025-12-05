@@ -30,7 +30,7 @@ if project_root not in sys.path:
 try:
     sys.path.insert(0, os.path.join(project_root, 'get_stock_info'))
     from get_stock_info.utils import get_influxdb_client, get_mysql_engine
-    from get_stock_info.stock_market_data_akshare import get_history_data
+    from get_stock_info.stock_market_data_akshare import get_history_data, get_history_valuation
     from get_stock_info.stock_meta_akshare import get_basic_info_mysql
     HAVE_GET_STOCK_INFO = True
 except ImportError:
@@ -43,6 +43,7 @@ class MarketDataLoader:
     市场数据加载器
     
     从 InfluxDB 加载原始市场数据（OHLCV、换手率等）
+    从 InfluxDB 加载历史市值数据（用于因子中性化）
     从 MySQL 加载股票元数据（上市时间、ST状态等）
     复用 get_stock_info 中的现有代码
     """
@@ -64,7 +65,7 @@ class MarketDataLoader:
         org : str
             组织名称
         bucket : str
-            bucket 名称
+            行情数据 bucket 名称（历史市值也存储在此 bucket）
         """
         self.url = url
         self.token = token
@@ -197,7 +198,8 @@ class MarketDataLoader:
     
     def _enrich_with_metadata(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
         """
-        从MySQL添加元数据字段（ST状态、上市时间、总股本等）
+        从MySQL添加元数据字段（ST状态、上市时间、行业等）
+        从InfluxDB添加历史市值字段（用于因子中性化）
         
         Parameters:
         -----------
@@ -233,17 +235,113 @@ class MarketDataLoader:
                     if list_date:
                         df['list_date'] = pd.to_datetime(list_date)
                     
+                    # 添加行业信息（用于行业中性化）
+                    industry = stock_info.get('所属行业')
+                    if industry:
+                        df['industry'] = industry
+                    
                     # 添加总股本（用于后续可能的计算）
                     shares_outstanding = stock_info.get('总股本')
                     if shares_outstanding:
                         df['shares_outstanding'] = float(shares_outstanding)
-                        # 注意：换手率已经从InfluxDB加载（'换手率' -> 'turnover'）
-                        # 无需重复计算
                     
                     print(f"   ✓ 元数据添加完成")
                     
         except Exception as e:
             print(f"   ⚠️  添加元数据失败: {e}")
+        
+        # 从 InfluxDB 查询历史市值数据
+        df = self._enrich_with_historical_valuation(df, symbol)
+        
+        return df
+    
+    def _enrich_with_historical_valuation(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """
+        从 InfluxDB stock_valuation bucket 添加历史市值数据
+        
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            市场数据（需要有日期索引）
+        symbol : str
+            股票代码
+            
+        Returns:
+        --------
+        pd.DataFrame
+            添加了历史市值的市场数据
+        """
+        if df.empty or self.query_api is None:
+            return df
+        
+        try:
+            # 获取时间范围
+            if isinstance(df.index, pd.DatetimeIndex):
+                start_date = df.index.min().strftime('%Y-%m-%d')
+                end_date = df.index.max().strftime('%Y-%m-%d')
+            else:
+                print(f"   ⚠️  索引非日期类型，跳过历史市值查询")
+                return df
+            
+            # 使用 get_history_valuation 查询历史市值
+            valuation_df = get_history_valuation(self.query_api, symbol, start_date, end_date)
+            
+            if valuation_df.empty:
+                print(f"   ⚠️  无历史市值数据，使用静态市值")
+                df = self._calculate_market_cap_static(df, symbol)
+                return df
+            
+            # 处理时间格式
+            if '日期' in valuation_df.columns:
+                valuation_df['日期'] = pd.to_datetime(valuation_df['日期'])
+                if valuation_df['日期'].dt.tz is not None:
+                    valuation_df['日期'] = valuation_df['日期'].dt.tz_localize(None)
+                valuation_df = valuation_df.set_index('日期')
+            
+            # 合并市值数据到主 DataFrame
+            if '总市值' in valuation_df.columns:
+                # 将 df 索引转换为无时区
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
+                
+                # 按日期合并
+                df = df.join(valuation_df[['总市值']], how='left')
+                df = df.rename(columns={'总市值': 'market_cap'})
+                
+                # 填充缺失值（前向填充）
+                df['market_cap'] = df['market_cap'].ffill()
+                
+                print(f"   ✓ 历史市值添加完成")
+                
+        except Exception as e:
+            print(f"   ⚠️  查询历史市值失败: {e}")
+            df = self._calculate_market_cap_static(df, symbol)
+        
+        return df
+    
+    def _calculate_market_cap_static(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """
+        使用静态总股本计算市值（降级方案）
+        
+        当没有历史市值数据时，使用 MySQL 中的总股本 × 收盘价
+        注意：这种方法不够准确，因为历史上可能有增发/送股等事件
+        
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            市场数据
+        symbol : str
+            股票代码
+            
+        Returns:
+        --------
+        pd.DataFrame
+            添加了估算市值的市场数据
+        """
+        if 'shares_outstanding' in df.columns and 'close' in df.columns:
+            shares = df['shares_outstanding'].iloc[0]
+            df['market_cap'] = df['close'] * shares
+            print(f"   ⚠️  使用静态总股本计算市值（不够准确）")
         
         return df
     
@@ -420,6 +518,54 @@ class MarketDataLoader:
         if self.client:
             self.client.close()
             print("✅ InfluxDB 连接已关闭")
+    
+    def load_historical_valuation(self,
+                                   symbol: str,
+                                   start_date: str,
+                                   end_date: str) -> pd.DataFrame:
+        """
+        从 InfluxDB stock_valuation bucket 加载历史市值数据
+        
+        Parameters:
+        -----------
+        symbol : str
+            股票代码
+        start_date : str
+            开始日期 (YYYY-MM-DD)
+        end_date : str
+            结束日期 (YYYY-MM-DD)
+            
+        Returns:
+        --------
+        pd.DataFrame
+            包含历史市值的 DataFrame
+        """
+        if self.query_api is None:
+            raise RuntimeError("InfluxDB 未连接")
+        
+        query = f'''
+        from(bucket: "{self.valuation_bucket}")
+            |> range(start: {start_date}T00:00:00Z, stop: {end_date}T23:59:59Z)
+            |> filter(fn: (r) => r["_measurement"] == "stock_valuation")
+            |> filter(fn: (r) => r["股票代码"] == "{symbol}")
+            |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+        '''
+        
+        try:
+            result = self.query_api.query_data_frame(query)
+            if isinstance(result, list):
+                result = pd.concat(result) if result else pd.DataFrame()
+            
+            if not result.empty and '_time' in result.columns:
+                result['_time'] = pd.to_datetime(result['_time']).dt.tz_localize(None)
+                result = result.set_index('_time')
+                result = result.sort_index()
+            
+            return result
+            
+        except Exception as e:
+            print(f"   ⚠️  查询历史市值失败: {e}")
+            return pd.DataFrame()
 
 
 if __name__ == "__main__":
@@ -457,6 +603,17 @@ if __name__ == "__main__":
             print(f"   缺失值: {df.isna().sum().sum()}")
             print(f"   日期范围: {df.index.min()} ~ {df.index.max()}")
             
+            # 检查历史市值是否加载
+            if 'market_cap' in df.columns:
+                print(f"\n✅ 历史市值加载成功:")
+                print(f"   市值范围: {df['market_cap'].min():.2e} ~ {df['market_cap'].max():.2e}")
+            else:
+                print(f"\n⚠️  历史市值未加载，请先运行 stock_historical_valuation.py 爬取数据")
+            
+            # 检查行业信息
+            if 'industry' in df.columns:
+                print(f"\n✅ 行业信息: {df['industry'].iloc[0]}")
+            
             # 获取停牌信息
             suspend_df = loader.get_suspend_info(symbol, start_date, end_date)
             if not suspend_df.empty:
@@ -475,3 +632,4 @@ if __name__ == "__main__":
         print(f"❌ 错误: {str(e)}")
         import traceback
         traceback.print_exc()
+
