@@ -202,13 +202,26 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
         raise ValueError(f"未加载到任何数据，请检查InfluxDB连接和股票代码")
     
     # 计算目标变量（远期收益）
+    # 使用 Open-to-Open 执行假设：T日收盘生成信号 → T+1开盘买入 → T+1+H开盘卖出
     from evaluation.cross_section_metrics import calculate_forward_returns
     
-    prices_df = features_df[['close']]
+    # 确保有 open 价格列
+    if 'open' in features_df.columns:
+        prices_df = features_df[['open']]
+        price_col = 'open'
+        execution_lag = 1  # T+1 执行
+    else:
+        print("   ⚠️ 未找到 'open' 列，降级使用 'close'（存在前视偏差）")
+        prices_df = features_df[['close']]
+        price_col = 'close'
+        execution_lag = 0
+    
     targets_df = calculate_forward_returns(
         prices=prices_df,
         periods=[1, 5, 10, 20],
-        method='simple'
+        method='simple',
+        price_col=price_col,
+        execution_lag=execution_lag
     )
     
     print(f"\n✅ 数据加载完成")
@@ -378,15 +391,31 @@ def prepare_factors(config_path: str = "configs/ml_baseline.yml",
     print("=" * 80)
     
     # 准备价格数据用于计算forward returns
-    prices_df = features_df[['close']] if 'close' in features_df.columns else None
+    # 使用 Open-to-Open 执行假设（无前视偏差）
+    if 'open' in features_df.columns:
+        prices_df = features_df[['open']]
+        price_col = 'open'
+        execution_lag = 1  # T+1 开盘执行
+        exec_mode = 'Open-to-Open (T+1执行)'
+    elif 'close' in features_df.columns:
+        prices_df = features_df[['close']]
+        price_col = 'close'
+        execution_lag = 0
+        exec_mode = 'Close-to-Close (理想)'
+    else:
+        prices_df = None
+        exec_mode = 'N/A'
     
     # 计算远期收益（使用你的cross_section_metrics）
     print(f"\n📊 计算远期收益...")
+    print(f"   执行模式: {exec_mode}")
     forward_horizons = [1, 5, 10, 20]
     forward_returns_df = calculate_forward_returns(
         prices=prices_df,
         periods=forward_horizons,
-        method='simple'
+        method='simple',
+        price_col=price_col,
+        execution_lag=execution_lag
     )
     print(f"   ✅ 远期收益计算完成: {forward_returns_df.shape}")
     

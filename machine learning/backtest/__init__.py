@@ -1,7 +1,13 @@
 """
-回测模块 - Top桶策略和其他回测功能
+回测模块 - 组合回测功能
+
+包含：
+- SimplePortfolioBacktester: 简易组合回测器（Top-K 等权）
+- StrategyBacktest: 聚类策略回测（历史遗留）
 """
 
-# Top桶回测功能从top_bucket_backtest.py导入
+from .simple_backtest import SimplePortfolioBacktester
 
-__all__ = []
+__all__ = [
+    'SimplePortfolioBacktester'
+]

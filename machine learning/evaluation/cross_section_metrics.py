@@ -86,19 +86,28 @@ def _spearman_corr(x: np.ndarray, y: np.ndarray) -> float:
 
 def calculate_forward_returns(prices: pd.DataFrame,
                               periods: List[int] = [1, 5, 10, 20],
-                              method: str = 'simple') -> pd.DataFrame:
+                              method: str = 'simple',
+                              price_col: str = 'close',
+                              execution_lag: int = 0) -> pd.DataFrame:
     """
     计算远期收益率
     
     Parameters:
     -----------
     prices : pd.DataFrame
-        价格数据，MultiIndex[date, ticker]，列为'close'或直接Series
+        价格数据，MultiIndex[date, ticker]
     periods : List[int]
         前瞻期数列表（如[1, 5, 10, 20]天）
     method : str
         'simple': (P_{t+H} - P_t) / P_t
         'log': log(P_{t+H}) - log(P_t)
+    price_col : str
+        使用的价格列名（默认'close'）。
+        若要计算 T+1 Open 执行的收益，请传入 'open' 并设置 execution_lag=1
+    execution_lag : int
+        执行延迟天数（默认0）。
+        0: 基于当期价格 P_t 计算 (Close_t -> Close_{t+H}) - 存在前视偏差
+        1: 基于下一期价格 P_{t+1} 计算 (Open_{t+1} -> Open_{t+1+H}) - 模拟 T+1 执行
         
     Returns:
     --------
@@ -108,7 +117,9 @@ def calculate_forward_returns(prices: pd.DataFrame,
     if isinstance(prices, pd.Series):
         prices_series = prices
     elif isinstance(prices, pd.DataFrame):
-        if 'close' in prices.columns:
+        if price_col in prices.columns:
+            prices_series = prices[price_col]
+        elif 'close' in prices.columns:
             prices_series = prices['close']
         else:
             prices_series = prices.iloc[:, 0]
@@ -117,21 +128,27 @@ def calculate_forward_returns(prices: pd.DataFrame,
     
     forward_returns = pd.DataFrame(index=prices_series.index)
     
+    # 按标的分组
+    grouped = prices_series.groupby(level='ticker')
+    
     for period in periods:
         col_name = f'ret_{period}d'
         
+        # 计算逻辑：
+        # execution_lag=0 (Close-to-Close): P_{t+H} / P_t - 1
+        # execution_lag=1 (Open-to-Open):   P_{t+1+H} / P_{t+1} - 1
+        
+        # 分母：P_{t + lag}
+        denom = grouped.shift(-execution_lag)
+        # 分子：P_{t + lag + H}
+        numer = grouped.shift(-(execution_lag + period))
+        
         if method == 'simple':
-            # Simple return: r = P_{t+H} / P_t - 1
-            forward_returns[col_name] = (
-                prices_series.groupby(level='ticker')
-                .shift(-period) / prices_series - 1
-            )
+            # Simple return: P_end / P_start - 1
+            forward_returns[col_name] = numer / denom - 1
         elif method == 'log':
-            # Log return: r = log(P_{t+H}) - log(P_t)
-            forward_returns[col_name] = (
-                np.log(prices_series.groupby(level='ticker').shift(-period)) -
-                np.log(prices_series)
-            )
+            # Log return: log(P_end) - log(P_start)
+            forward_returns[col_name] = np.log(numer) - np.log(denom)
         else:
             raise ValueError(f"不支持的方法: {method}")
     

@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-12-09T09:11:34.606120",
+  "tasks": [
+    "regression",
+    "regression_rank",
+    "lambdarank"
+  ],
+  "metrics": {
+    "regression": {
+      "mean_ic": 0.06736579141929788,
+      "icir": 0.38784829386841396,
+      "icir_annual": 6.156900791979125,
+      "t_stat": 7.0027832675632995,
+      "ic_positive_ratio": 0.6288343558282209,
+      "spread_mean": 0.004640805481847127,
+      "spread_sharpe": 0.24610806022346315
+    },
+    "regression_rank": {
+      "mean_ic": 0.054297470943895795,
+      "icir": 0.37719870097906116,
+      "icir_annual": 5.98784374588327,
+      "t_stat": 6.810499861729308,
+      "ic_positive_ratio": 0.6319018404907976,
+      "spread_mean": 0.0017466094105605342,
+      "spread_sharpe": 0.10832948379649439,
+      "ic_improvement_vs_baseline": -19.39904542063835,
+      "icir_improvement_vs_baseline": -2.7458140354656058
+    },
+    "lambdarank": {
+      "mean_ic": 0.03163665049558025,
+      "icir": 0.21012392941168423,
+      "icir_annual": 3.335613970362042,
+      "t_stat": 3.7938863216915855,
+      "ic_positive_ratio": 0.5950920245398773,
+      "spread_mean": 0.0034846707597011666,
+      "spread_sharpe": 0.21638162729873311,
+      "ic_improvement_vs_baseline": -53.03751380479219,
+      "icir_improvement_vs_baseline": -45.82316520825708
+    }
+  }
+}

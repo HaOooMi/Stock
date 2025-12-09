@@ -62,6 +62,7 @@ from models.lgbm_ranker import LightGBMRanker, prepare_ranking_data
 from evaluation.cross_section_analyzer import CrossSectionAnalyzer
 from evaluation.cross_section_metrics import calculate_forward_returns
 from evaluation.drift_detector import DriftDetector
+from backtest.simple_backtest import SimplePortfolioBacktester
 
 
 def load_config(config_path: str = "configs/ml_baseline.yml") -> dict:
@@ -711,6 +712,99 @@ def run_prediction_drift_detection(predictions: Dict[str, pd.Series],
     return all_drift_reports
 
 
+def run_portfolio_backtest(predictions: Dict[str, pd.Series],
+                           prices: pd.DataFrame,
+                           output_dir: str,
+                           top_k: int = 30,
+                           compare_modes: bool = True) -> Dict:
+    """
+    运行组合回测（阶段二：闭环回测）
+    
+    支持 A/B 测试：
+    - Close-to-Close (理想情况，有前视偏差)
+    - Open-to-Open (现实情况，T+1 执行)
+    
+    Parameters:
+    -----------
+    predictions : Dict[str, pd.Series]
+        各任务类型的预测结果 {task_type: pred_series}
+    prices : pd.DataFrame
+        价格数据，MultiIndex [date, ticker]，必须包含 'open' 和 'close' 列
+    output_dir : str
+        输出目录
+    top_k : int
+        Top-K 选股数量
+    compare_modes : bool
+        是否对比两种执行模式
+        
+    Returns:
+    --------
+    Dict
+        各任务类型的回测结果
+    """
+    print("\n" + "=" * 70)
+    print("组合回测 (Simple Portfolio Backtest)")
+    print("=" * 70)
+    
+    if prices is None:
+        print("⚠️ 价格数据为空，跳过回测")
+        print("   提示：请确保 DataLoader 加载了包含 'open' 和 'close' 列的价格数据")
+        return {}
+    
+    # 检查价格数据是否包含必要列
+    required_cols = ['open', 'close']
+    missing_cols = [col for col in required_cols if col not in prices.columns]
+    if missing_cols:
+        print(f"⚠️ 价格数据缺少列: {missing_cols}，跳过回测")
+        return {}
+    
+    all_backtest_results = {}
+    
+    for task_type, pred_series in predictions.items():
+        print(f"\n📊 回测 {task_type}...")
+        
+        try:
+            backtester = SimplePortfolioBacktester(top_k=top_k)
+            
+            if compare_modes:
+                # A/B 测试：对比两种执行模式
+                result = backtester.compare_modes(
+                    predictions=pred_series,
+                    prices=prices,
+                    save_dir=output_dir
+                )
+                all_backtest_results[task_type] = result
+                
+                # 保存统计结果
+                stats_path = os.path.join(output_dir, f'{task_type}_backtest_stats.json')
+                stats_to_save = {
+                    'close_to_close': result['close_to_close']['stats'],
+                    'open_to_open': result['open_to_open']['stats'],
+                    'comparison': {k: float(v) if isinstance(v, (np.floating, float)) else v 
+                                   for k, v in result['comparison'].items() 
+                                   if not isinstance(v, dict)}
+                }
+                with open(stats_path, 'w', encoding='utf-8') as f:
+                    json.dump(stats_to_save, f, indent=2, ensure_ascii=False, default=str)
+                print(f"   ✅ 回测统计已保存: {stats_path}")
+                
+            else:
+                # 单模式回测
+                result = backtester.run(pred_series, prices)
+                all_backtest_results[task_type] = result
+                
+                # 绘制并保存图表
+                plot_path = os.path.join(output_dir, f'{task_type}_backtest.png')
+                backtester.plot(result, save_path=plot_path)
+                
+        except Exception as e:
+            print(f"   ❌ {task_type} 回测失败: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    return all_backtest_results
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='Baseline 模型训练管道')
@@ -723,6 +817,10 @@ def main():
                         help='运行三条线对比')
     parser.add_argument('--skip_drift', action='store_true',
                         help='跳过漂移检测')
+    parser.add_argument('--skip_backtest', action='store_true',
+                        help='跳过组合回测')
+    parser.add_argument('--backtest_top_k', type=int, default=30,
+                        help='回测 Top-K 选股数量')
     
     args = parser.parse_args()
     
@@ -819,6 +917,59 @@ def main():
     # 对比结果
     if len(all_results) > 1:
         compare_results(all_results, output_dir)
+    
+    # ========== 组合回测 (阶段二) ==========
+    if not args.skip_backtest and all_predictions:
+        # 尝试加载价格数据用于回测
+        # 如果 prepare_data 没有返回 prices，尝试从 InfluxDB 或文件加载
+        if prices is None:
+            print("\n📂 尝试加载价格数据用于回测...")
+            try:
+                # 尝试从 DataLoader 加载价格数据
+                data_config = config['data']
+                influxdb_config = data_config.get('influxdb', {}).copy()
+                influxdb_config.pop('enabled', None)
+                
+                loader = DataLoader(
+                    enable_influxdb=data_config['influxdb']['enabled'],
+                    influxdb_config=influxdb_config
+                )
+                
+                # 获取所有股票代码
+                all_tickers = list(set(
+                    idx[1] for pred in all_predictions.values() 
+                    for idx in pred.index
+                ))
+                
+                # 加载价格数据
+                prices_list = []
+                for ticker in all_tickers[:10]:  # 限制数量避免过慢
+                    try:
+                        price_df = loader.load_market_data(ticker)
+                        if price_df is not None and 'open' in price_df.columns:
+                            prices_list.append(price_df)
+                    except:
+                        continue
+                
+                if prices_list:
+                    prices = pd.concat(prices_list)
+                    print(f"   ✅ 加载价格数据: {len(prices)} 条记录")
+                else:
+                    print("   ⚠️ 无法加载价格数据，跳过回测")
+                    prices = None
+                    
+            except Exception as e:
+                print(f"   ⚠️ 加载价格数据失败: {e}")
+                prices = None
+        
+        if prices is not None:
+            backtest_results = run_portfolio_backtest(
+                predictions=all_predictions,
+                prices=prices,
+                output_dir=output_dir,
+                top_k=args.backtest_top_k,
+                compare_modes=True  # 默认进行 A/B 测试
+            )
     
     print("\n" + "=" * 70)
     print("✅ Baseline 模型训练完成")

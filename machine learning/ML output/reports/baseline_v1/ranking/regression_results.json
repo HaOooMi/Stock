@@ -5,7 +5,7 @@
   "test_samples": 15167,
   "training_result": {
     "model_name": "LightGBM",
-    "training_time": 0.08940720558166504,
+    "training_time": 0.1433701515197754,
     "train_samples": 43511,
     "train_mse": 0.004855287708523109,
     "train_mae": 0.047057751570273275,

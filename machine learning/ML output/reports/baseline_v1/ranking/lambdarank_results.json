@@ -1,0 +1,39 @@
+{
+  "task_type": "lambdarank",
+  "train_samples": 43511,
+  "valid_samples": 14968,
+  "test_samples": 14982,
+  "training_result": {
+    "model_name": "LightGBMRanker",
+    "training_time": 0.17214274406433105,
+    "train_samples": 43511,
+    "train_groups": 990,
+    "n_features": 9,
+    "n_estimators": 2,
+    "best_iteration": 2,
+    "valid_samples": 14968,
+    "valid_groups": 326,
+    "valid_ndcg@10": 0.37741121704404496,
+    "valid_ndcg@30": 0.5546372427828513,
+    "valid_ndcg@50": 0.723997161610463
+  },
+  "ic_summary": {
+    "('model_score', 'ret_5d')": {
+      "mean": 0.03163665049558025,
+      "std": 0.15056186405878746,
+      "icir": 0.21012392941168423,
+      "icir_annual": 3.335613970362042,
+      "t_stat": 3.7938863216915855,
+      "p_value": 0.00017684597107946886,
+      "n_obs": 326,
+      "positive_ratio": 0.5950920245398773
+    }
+  },
+  "spreads": {
+    "('model_score', 'ret_5d')": {
+      "mean": 0.0034846707597011666,
+      "std": 0.016104282064993827,
+      "sharpe": 0.21638162729873311
+    }
+  }
+}

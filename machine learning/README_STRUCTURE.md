@@ -142,14 +142,6 @@ ML output/
 
 ---
 
-### 1️⃣-C 数据准备流程（多标的版）(`pipelines/prepare_data_multi.py`)
-
-**状态**: ⚠️ **空文件（占位符）** - 功能已合并到 `prepare_data.py`
-
-**说明**: 原计划独立的多标的脚本，现已整合到 `prepare_data.py` 中（通过检测配置文件中 symbol 类型自动切换）
-
----
-
 ### 2️⃣ Baseline 模型训练 (`pipelines/run_baseline_pipeline.py`) ⭐新增
 
 **功能**: Learning-to-Rank 三条线对比

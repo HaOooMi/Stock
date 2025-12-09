@@ -162,7 +162,8 @@ class CrossSectionAnalyzer:
     
     def calculate_returns(self,
                          periods: List[int] = [1, 5, 10, 20],
-                         method: str = 'simple'):
+                         method: str = 'simple',
+                         **kwargs):
         """
         计算远期收益率
         
@@ -184,13 +185,20 @@ class CrossSectionAnalyzer:
         print("计算远期收益率")
         print("=" * 70)
         
+        # 获取执行假设参数（如果调用方传入了 kwargs）
+        price_col = kwargs.get('price_col', 'close')
+        execution_lag = kwargs.get('execution_lag', 0)
+        
         self.forward_returns = calculate_forward_returns(
             self.prices,
             periods=periods,
-            method=method
+            method=method,
+            price_col=price_col,
+            execution_lag=execution_lag
         )
         
-        print(f"✅ 计算完成，期数: {periods}\n")
+        mode_desc = 'Open-to-Open (T+1执行)' if execution_lag == 1 else 'Close-to-Close (理想)'
+        print(f"✅ 计算完成，期数: {periods}，模式: {mode_desc}\n")
         
         return self
     
