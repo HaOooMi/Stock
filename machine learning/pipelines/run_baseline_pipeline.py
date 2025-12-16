@@ -167,7 +167,7 @@ def prepare_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
                     
                     # 对齐特征和目标
                     common_idx = features.index.intersection(forward_returns.index)
-                    print(f"   📊 共同索引数: {len(common_idx)}")
+                    print(f"   � 共同索引数: {len(common_idx)}")
                     
                     if len(common_idx) == 0:
                         raise ValueError("特征和目标没有共同索引，请检查日期格式")
@@ -181,9 +181,64 @@ def prepare_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
             
             print(f"✅ 特征加载完成: {features.shape}")
             print(f"✅ 目标加载完成: {len(forward_returns)}")
+            
+            # ===== 加载价格数据用于回测（中性化因子模式） =====
+            print("\n📂 加载价格数据用于回测...")
+            prices = None
+            
+            # 准备 InfluxDB 配置
+            influxdb_config = data_config.get('influxdb', {})
+            
+            # 初始化 MarketDataLoader
+            if influxdb_config.get('enabled', False):
+                try:
+                    from data.market_data_loader import MarketDataLoader
+                    
+                    market_loader = MarketDataLoader(
+                        url=influxdb_config['url'],
+                        token=influxdb_config['token'],
+                        org=influxdb_config['org'],
+                        bucket=influxdb_config['bucket']
+                    )
+                    
+                    all_prices = []
+                    for ticker in available_tickers:
+                        try:
+                            price_df = market_loader.load_market_data(
+                                symbol=ticker,
+                                start_date=str(data_config['start_date']),
+                                end_date=str(data_config['end_date'])
+                            )
+                            if not price_df.empty:
+                                price_df['ticker'] = ticker
+                                price_df = price_df.reset_index()
+                                price_df = price_df.rename(columns={'index': 'date'})
+                                price_df['date'] = pd.to_datetime(price_df['date']).dt.tz_localize(None)
+                                price_df = price_df.set_index(['date', 'ticker'])
+                                all_prices.append(price_df)
+                                print(f"   ✅ {ticker}: {len(price_df)} 条价格记录")
+                        except Exception as e:
+                            print(f"   ⚠️ {ticker} 价格加载失败: {e}")
+                            continue
+                    
+                    if all_prices:
+                        prices = pd.concat(all_prices)
+                        required_cols = ['open', 'close']
+                        missing_cols = [col for col in required_cols if col not in prices.columns]
+                        if missing_cols:
+                            print(f"   ⚠️ 价格数据缺少列: {missing_cols}，回测将无法运行")
+                            prices = None
+                        else:
+                            print(f"   ✅ 价格数据加载完成: {len(prices)} 条记录")
+                except Exception as e:
+                    print(f"   ⚠️ 价格数据加载失败: {e}")
+                    prices = None
+            else:
+                print("   ⚠️ InfluxDB 未启用，无法加载价格数据")
+            
             print(f"✅ 样本总数: {len(features):,}")
             
-            return features, forward_returns, None
+            return features, forward_returns, prices
     
     # ===== 原有逻辑：按单股票加载 =====
     # 初始化数据加载器
@@ -234,8 +289,49 @@ def prepare_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
     # 构造 forward_returns DataFrame（评估需要）
     forward_returns = targets.to_frame(f'ret_{forward_periods}d')
     
-    # prices 暂时设为 None（如果需要可以从 InfluxDB 加载）
+    # ===== 加载价格数据用于回测 =====
+    print("\n📂 加载价格数据用于回测...")
     prices = None
+    
+    if loader.market_data_loader is not None:
+        # 从 InfluxDB 加载价格数据
+        try:
+            all_prices = []
+            for symbol in symbols:
+                try:
+                    price_df = loader.market_data_loader.load_market_data(
+                        symbol=symbol,
+                        start_date=str(data_config['start_date']),
+                        end_date=str(data_config['end_date'])
+                    )
+                    if not price_df.empty:
+                        # 添加 ticker 列并设置 MultiIndex
+                        price_df['ticker'] = symbol
+                        price_df = price_df.reset_index()
+                        price_df = price_df.rename(columns={'index': 'date'})
+                        price_df['date'] = pd.to_datetime(price_df['date'])
+                        price_df = price_df.set_index(['date', 'ticker'])
+                        all_prices.append(price_df)
+                        print(f"   ✅ {symbol}: {len(price_df)} 条价格记录")
+                except Exception as e:
+                    print(f"   ⚠️ {symbol} 价格加载失败: {e}")
+                    continue
+            
+            if all_prices:
+                prices = pd.concat(all_prices)
+                # 确保包含 open 和 close 列
+                required_cols = ['open', 'close']
+                missing_cols = [col for col in required_cols if col not in prices.columns]
+                if missing_cols:
+                    print(f"   ⚠️ 价格数据缺少列: {missing_cols}，回测将无法运行")
+                    prices = None
+                else:
+                    print(f"   ✅ 价格数据加载完成: {len(prices)} 条记录")
+        except Exception as e:
+            print(f"   ⚠️ 价格数据加载失败: {e}")
+            prices = None
+    else:
+        print("   ⚠️ MarketDataLoader 未初始化，无法加载价格数据")
     
     print(f"✅ 样本总数: {len(features):,}")
     

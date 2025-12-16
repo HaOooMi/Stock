@@ -1,6 +1,6 @@
 {
   "snapshot_id": "ds_2025Q4_v4",
-  "created_at": "2025-12-05T11:20:06.425599",
+  "created_at": "2025-12-15T10:50:28.212778",
   "version": "1.0",
   "data_sources": [],
   "filters": {
@@ -11,7 +11,7 @@
     "tradable_ratio": 97.08780952629587
   },
   "quality_checks": {
-    "timestamp": "2025-12-05T11:20:06.431183",
+    "timestamp": "2025-12-15T10:50:28.218118",
     "total_samples": 76609,
     "checks": {
       "missing_ratio": {

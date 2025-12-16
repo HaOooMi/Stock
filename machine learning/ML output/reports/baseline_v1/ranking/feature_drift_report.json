@@ -7,7 +7,6 @@
     "roc_60d": 0.23000634525930427,
     "price_to_sma_10d": 0.24517394784288415,
     "realized_vol_60d": 0.07095471510967469,
-    "parkinson_vol_20d": 0.2620069284713577,
     "hl_range_mean_5d": 0.2639433785202488
   },
   "train_vs_test": {
@@ -18,7 +17,6 @@
     "roc_60d": 0.09243296982346978,
     "price_to_sma_10d": 0.2560550404059143,
     "realized_vol_60d": 0.892238772829846,
-    "parkinson_vol_20d": 0.03926011807742071,
     "hl_range_mean_5d": 0.14524474435017867
   },
   "drifted_features": [
@@ -28,5 +26,5 @@
     "realized_vol_60d"
   ],
   "n_drifted": 4,
-  "n_checked": 9
+  "n_checked": 8
 }

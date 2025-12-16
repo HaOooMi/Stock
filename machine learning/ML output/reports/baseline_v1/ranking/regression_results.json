@@ -5,34 +5,34 @@
   "test_samples": 15167,
   "training_result": {
     "model_name": "LightGBM",
-    "training_time": 0.1433701515197754,
+    "training_time": 0.09056758880615234,
     "train_samples": 43511,
-    "train_mse": 0.004855287708523109,
-    "train_mae": 0.047057751570273275,
-    "n_features": 9,
-    "n_estimators": 25,
-    "best_iteration": 25,
+    "train_mse": 0.004889922009198978,
+    "train_mae": 0.047227254140642536,
+    "n_features": 8,
+    "n_estimators": 10,
+    "best_iteration": 10,
     "valid_samples": 14968,
-    "valid_mse": 0.004194060962273791,
-    "valid_mae": 0.043180084093460656
+    "valid_mse": 0.004193946849908443,
+    "valid_mae": 0.04319883259531777
   },
   "ic_summary": {
     "('model_score', 'ret_5d')": {
-      "mean": 0.06736579141929788,
-      "std": 0.17369108613934808,
-      "icir": 0.38784829386841396,
-      "icir_annual": 6.156900791979125,
-      "t_stat": 7.0027832675632995,
-      "p_value": 1.447142908840776e-11,
+      "mean": 0.06382250396796119,
+      "std": 0.17700021992148648,
+      "icir": 0.36057867044612424,
+      "icir_annual": 5.724008940448561,
+      "t_stat": 6.510417397625629,
+      "p_value": 2.842364243763363e-10,
       "n_obs": 326,
-      "positive_ratio": 0.6288343558282209
+      "positive_ratio": 0.6257668711656442
     }
   },
   "spreads": {
     "('model_score', 'ret_5d')": {
-      "mean": 0.004640805481847127,
-      "std": 0.01885677973177039,
-      "sharpe": 0.24610806022346315
+      "mean": 0.004580978583225949,
+      "std": 0.018158787641000797,
+      "sharpe": 0.25227337164748487
     }
   }
 }

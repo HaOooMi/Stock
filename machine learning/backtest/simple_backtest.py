@@ -522,12 +522,28 @@ class SimplePortfolioBacktester:
         ax4 = axes[1, 1]
         alpha_decay = comparison['alpha_decay']
         
-        labels = ['可执行 Alpha', '隔夜衰减']
-        sizes = [1 - alpha_decay, alpha_decay] if alpha_decay < 1 else [0.01, 0.99]
-        colors = ['green', 'red']
+        # 确保 sizes 为非负值
+        if alpha_decay < 0:
+            # 如果 Open-to-Open 收益更高（Alpha 衰减为负），显示 Alpha 增强
+            labels = ['可执行 Alpha', 'Alpha 增强']
+            sizes = [1.0, abs(alpha_decay)]
+            colors = ['green', 'lightgreen']
+            title_text = f'Alpha 分析 (增强: {abs(alpha_decay):.1%})'
+        elif alpha_decay >= 1:
+            # 如果衰减超过 100%，说明策略在 Open-to-Open 下失效
+            labels = ['可执行 Alpha', '隔夜衰减']
+            sizes = [0.01, 0.99]
+            colors = ['green', 'red']
+            title_text = f'Alpha 衰减分析 (衰减: {alpha_decay:.1%})'
+        else:
+            # 正常情况：0 <= alpha_decay < 1
+            labels = ['可执行 Alpha', '隔夜衰减']
+            sizes = [1 - alpha_decay, alpha_decay]
+            colors = ['green', 'red']
+            title_text = f'Alpha 衰减分析 (衰减: {alpha_decay:.1%})'
         
         ax4.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
-        ax4.set_title(f'Alpha 衰减分析 (衰减: {alpha_decay:.1%})')
+        ax4.set_title(title_text)
         
         plt.tight_layout()
         

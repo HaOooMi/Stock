@@ -2,253 +2,83 @@
   "regression": {
     "factor": "model_score",
     "period": "5d",
-    "timestamp": "2025-12-09T09:11:28.260200",
+    "timestamp": "2025-12-16T10:39:34.798815",
     "threshold": 0.3,
     "checks": {
       "ic_comparison": {
         "mean": {
-          "train": 0.08128826919105281,
-          "valid": 0.028857813620275105,
-          "test": 0.06736579141929788,
-          "valid_vs_train_pct": 0.6449941189859728,
-          "test_vs_train_pct": 0.17127290210882407,
-          "valid_vs_test_pct": 0.47372121687714874,
+          "train": 0.07218303515042906,
+          "valid": 0.02408342203095981,
+          "test": 0.06382250396796119,
+          "valid_vs_train_pct": 0.6663562015538681,
+          "test_vs_train_pct": 0.11582404598316731,
+          "valid_vs_test_pct": 0.5505321555707008,
           "drift_detected": true
         },
         "std": {
-          "train": 0.17113203608568456,
-          "valid": 0.1465041056240579,
-          "test": 0.17369108613934808,
-          "valid_vs_train_pct": 0.143911864925721,
-          "test_vs_train_pct": 0.014953658661445643,
-          "valid_vs_test_pct": 0.15886552358716663,
+          "train": 0.17339626009922415,
+          "valid": 0.15478697256012244,
+          "test": 0.17700021992148648,
+          "valid_vs_train_pct": 0.10732231207554734,
+          "test_vs_train_pct": 0.020784530301864664,
+          "valid_vs_test_pct": 0.128106842377412,
           "drift_detected": false
         },
         "icir": {
-          "train": 0.4750032258738064,
-          "valid": 0.19697614273231856,
-          "test": 0.38784829386841396,
-          "valid_vs_train_pct": 0.5853161999690314,
-          "test_vs_train_pct": 0.18348282129045326,
-          "valid_vs_test_pct": 0.4018333786785781,
+          "train": 0.4162894580836005,
+          "valid": 0.1555907556858851,
+          "test": 0.36057867044612424,
+          "valid_vs_train_pct": 0.6262438246643304,
+          "test_vs_train_pct": 0.13382704403311665,
+          "valid_vs_test_pct": 0.4924167806312137,
           "drift_detected": true
         },
         "icir_annual": {
-          "train": 7.540442445693199,
-          "valid": 3.1268993272948666,
-          "test": 6.156900791979125,
-          "valid_vs_train_pct": 0.5853161999690314,
-          "test_vs_train_pct": 0.18348282129045332,
-          "valid_vs_test_pct": 0.40183337867857805,
+          "train": 6.608390277042324,
+          "valid": 2.4699266750727653,
+          "test": 5.724008940448561,
+          "valid_vs_train_pct": 0.6262438246643303,
+          "test_vs_train_pct": 0.13382704403311663,
+          "valid_vs_test_pct": 0.49241678063121375,
           "drift_detected": true
         },
         "positive_ratio": {
-          "train": 0.6868686868686869,
-          "valid": 0.5644171779141104,
-          "test": 0.6288343558282209,
-          "valid_vs_train_pct": 0.17827499097798633,
-          "test_vs_train_pct": 0.08449115842656074,
-          "valid_vs_test_pct": 0.09378383255142558,
+          "train": 0.6777777777777778,
+          "valid": 0.558282208588957,
+          "test": 0.6257668711656442,
+          "valid_vs_train_pct": 0.17630493814744047,
+          "test_vs_train_pct": 0.07673740319822989,
+          "valid_vs_test_pct": 0.09956753494921057,
           "drift_detected": false
         }
       },
       "spread_comparison": {
         "spread_mean": {
-          "train": 0.0071659276917612055,
-          "valid": -0.002086224122550331,
-          "test": 0.004640805481847127,
-          "valid_vs_test_pct": 0.9387520909723446,
+          "train": 0.005463727535761224,
+          "valid": -0.002188391948116235,
+          "test": 0.004580978583225949,
+          "valid_vs_test_pct": 1.2389656122189947,
           "drift_detected": true
         },
         "spread_sharpe": {
-          "train": 0.3766072250191615,
-          "valid": -0.14922804759176686,
-          "test": 0.24610806022346315,
-          "valid_vs_test_pct": 1.0497305456503538,
+          "train": 0.2879972525521482,
+          "valid": -0.15659080537757147,
+          "test": 0.25227337164748487,
+          "valid_vs_test_pct": 1.4196808247364183,
           "drift_detected": true
         },
         "spread_positive_ratio": {
-          "train": 0.6212121212121212,
-          "valid": 0.401840490797546,
-          "test": 0.5460122699386503,
-          "valid_vs_test_pct": 0.23208140056860682,
-          "drift_detected": false
-        }
-      },
-      "statistical_test": {
-        "test": "ks",
-        "statistic": 0.15030674846625766,
-        "p_value": 0.0012452047271076052,
-        "significant": true
-      }
-    },
-    "overall_pass": false
-  },
-  "regression_rank": {
-    "factor": "model_score",
-    "period": "5d",
-    "timestamp": "2025-12-09T09:11:31.420345",
-    "threshold": 0.3,
-    "checks": {
-      "ic_comparison": {
-        "mean": {
-          "train": 0.14609542903361392,
-          "valid": 0.030038614208577265,
-          "test": 0.054297470943895795,
-          "valid_vs_train_pct": 0.7943904582965021,
-          "test_vs_train_pct": 0.6283424382059009,
-          "valid_vs_test_pct": 0.16604802009060124,
-          "drift_detected": false
-        },
-        "std": {
-          "train": 0.16491885387809127,
-          "valid": 0.1529316611482822,
-          "test": 0.14394925221895163,
-          "valid_vs_train_pct": 0.07268539920044598,
-          "test_vs_train_pct": 0.12715102710233758,
-          "valid_vs_test_pct": 0.05446562790189161,
-          "drift_detected": false
-        },
-        "icir": {
-          "train": 0.8858625050936159,
-          "valid": 0.19641854396292663,
-          "test": 0.37719870097906116,
-          "valid_vs_train_pct": 0.7782742323627643,
-          "test_vs_train_pct": 0.5742017538724029,
-          "valid_vs_test_pct": 0.20407247849036134,
-          "drift_detected": false
-        },
-        "icir_annual": {
-          "train": 14.06263130564638,
-          "valid": 3.1180477212438666,
-          "test": 5.98784374588327,
-          "valid_vs_train_pct": 0.7782742323627642,
-          "test_vs_train_pct": 0.5742017538724029,
-          "valid_vs_test_pct": 0.20407247849036134,
-          "drift_detected": false
-        },
-        "positive_ratio": {
-          "train": 0.8090909090909091,
-          "valid": 0.5613496932515337,
-          "test": 0.6319018404907976,
-          "valid_vs_train_pct": 0.306197008340801,
-          "test_vs_train_pct": 0.2189977252360929,
-          "valid_vs_test_pct": 0.08719928310470812,
-          "drift_detected": false
-        }
-      },
-      "spread_comparison": {
-        "spread_mean": {
-          "train": 0.008018447373822537,
-          "valid": -0.000301257117089081,
-          "test": 0.0017466094105605342,
-          "valid_vs_test_pct": 0.2553943964682231,
-          "drift_detected": false
-        },
-        "spread_sharpe": {
-          "train": 0.47717750662927777,
-          "valid": -0.016710779383986765,
-          "test": 0.10832948379649439,
-          "valid_vs_test_pct": 0.26204140271353094,
-          "drift_detected": false
-        },
-        "spread_positive_ratio": {
-          "train": 0.6828282828282828,
+          "train": 0.6171717171717171,
           "valid": 0.4325153374233129,
-          "test": 0.49693251533742333,
-          "valid_vs_test_pct": 0.09433876647184815,
+          "test": 0.5920245398773006,
+          "valid_vs_test_pct": 0.2584518992298656,
           "drift_detected": false
         }
       },
       "statistical_test": {
         "test": "ks",
-        "statistic": 0.11042944785276074,
-        "p_value": 0.037466429281237786,
-        "significant": true
-      }
-    },
-    "overall_pass": true
-  },
-  "lambdarank": {
-    "factor": "model_score",
-    "period": "5d",
-    "timestamp": "2025-12-09T09:11:34.600063",
-    "threshold": 0.3,
-    "checks": {
-      "ic_comparison": {
-        "mean": {
-          "train": 0.07376082271726471,
-          "valid": 0.00677406517517072,
-          "test": 0.03163665049558025,
-          "valid_vs_train_pct": 0.9081617459564323,
-          "test_vs_train_pct": 0.5710914096383137,
-          "valid_vs_test_pct": 0.3370703363181185,
-          "drift_detected": true
-        },
-        "std": {
-          "train": 0.15539277223048278,
-          "valid": 0.14920379698436734,
-          "test": 0.15056186405878746,
-          "valid_vs_train_pct": 0.039827947962314425,
-          "test_vs_train_pct": 0.03108837111503478,
-          "valid_vs_test_pct": 0.008739576847279648,
-          "drift_detected": false
-        },
-        "icir": {
-          "train": 0.47467344625180286,
-          "valid": 0.04540142618408341,
-          "test": 0.21012392941168423,
-          "valid_vs_train_pct": 0.9043522941032622,
-          "test_vs_train_pct": 0.5573295050083368,
-          "valid_vs_test_pct": 0.34702278909492545,
-          "drift_detected": true
-        },
-        "icir_annual": {
-          "train": 7.535207356489529,
-          "valid": 0.7207252971044456,
-          "test": 3.335613970362042,
-          "valid_vs_train_pct": 0.9043522941032621,
-          "test_vs_train_pct": 0.5573295050083368,
-          "valid_vs_test_pct": 0.3470227890949255,
-          "drift_detected": true
-        },
-        "positive_ratio": {
-          "train": 0.6878787878787879,
-          "valid": 0.5153374233128835,
-          "test": 0.5950920245398773,
-          "valid_vs_train_pct": 0.25083105862003724,
-          "test_vs_train_pct": 0.13488824626361448,
-          "valid_vs_test_pct": 0.11594281235642277,
-          "drift_detected": false
-        }
-      },
-      "spread_comparison": {
-        "spread_mean": {
-          "train": 0.005547960450363053,
-          "valid": 0.0012993962941618916,
-          "test": 0.0034846707597011666,
-          "valid_vs_test_pct": 0.3938878953969963,
-          "drift_detected": true
-        },
-        "spread_sharpe": {
-          "train": 0.3099674526939679,
-          "valid": 0.07732193918010186,
-          "test": 0.21638162729873311,
-          "valid_vs_test_pct": 0.4486267410014994,
-          "drift_detected": true
-        },
-        "spread_positive_ratio": {
-          "train": 0.6191919191919192,
-          "valid": 0.50920245398773,
-          "test": 0.5552147239263804,
-          "valid_vs_test_pct": 0.07431019125491659,
-          "drift_detected": false
-        }
-      },
-      "statistical_test": {
-        "test": "ks",
-        "statistic": 0.10736196319018405,
-        "p_value": 0.04660746054148464,
+        "statistic": 0.13803680981595093,
+        "p_value": 0.003970836902563533,
         "significant": true
       }
     },
