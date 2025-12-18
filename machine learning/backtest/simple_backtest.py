@@ -464,7 +464,12 @@ class SimplePortfolioBacktester:
         
         # ===== 绘制对比图 =====
         if save_dir:
-            self._plot_comparison(results, comparison, save_dir)
+            try:
+                self._plot_comparison(results, comparison, save_dir)
+            except Exception as e:
+                print(f"⚠️ 绘制对比图失败: {e}")
+                import traceback
+                traceback.print_exc()
         
         return {
             'close_to_close': results['close_to_close'],

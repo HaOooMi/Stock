@@ -15,24 +15,29 @@ Baseline 模型训练管道 - Learning-to-Rank 三条线对比
 4. 三条线模型训练
 5. 横截面评估（CrossSectionAnalyzer）
 6. 模型预测漂移检测（IC/Spread）- 训练后
-7. 结果对比与报告
+7. 组合回测（SimplePortfolioBacktester）- A/B 测试对比执行模式
+8. 结果对比与报告
 
 使用方法：
     python run_baseline_pipeline.py
     python run_baseline_pipeline.py --task_type lambdarank
-    python run_baseline_pipeline.py --compare_all  # 运行三条线对比
-    python run_baseline_pipeline.py --skip_drift   # 跳过漂移检测
+    python run_baseline_pipeline.py --compare_all       # 运行三条线对比
+    python run_baseline_pipeline.py --skip_drift        # 跳过漂移检测
+    python run_baseline_pipeline.py --skip_backtest     # 跳过回测
+    python run_baseline_pipeline.py --backtest_top_k 50 # 设置 Top-K 选股数量
 
 输出：
     /ML output/reports/baseline_v1/ranking/
-    ├── model_comparison.json           # 三条线对比结果
-    ├── feature_drift_report.json       # 特征分布漂移检测（PSI）
-    ├── prediction_drift_report.json    # 模型预测漂移检测（IC/Spread）
+    ├── model_comparison.json              # 三条线对比结果
+    ├── feature_drift_report.json          # 特征分布漂移检测（PSI）
+    ├── prediction_drift_report.json       # 模型预测漂移检测（IC/Spread）
     ├── regression_results.json
     ├── regression_rank_results.json
     ├── lambdarank_results.json
     ├── {task_type}_predictions.parquet
-    └── {task_type}_model.pkl
+    ├── {task_type}_model.pkl
+    ├── {task_type}_backtest_stats.json    # 回测统计结果
+    └── {task_type}_comparison_*.png       # 回测净值曲线图（A/B 对比）
 
 创建: 2025-12-04 | 版本: v1.2
 """
@@ -864,6 +869,7 @@ def run_portfolio_backtest(predictions: Dict[str, pd.Series],
             
             if compare_modes:
                 # A/B 测试：对比两种执行模式
+                print(f"   执行 A/B 测试（Close-to-Close vs Open-to-Open）...")
                 result = backtester.compare_modes(
                     predictions=pred_series,
                     prices=prices,
@@ -883,6 +889,19 @@ def run_portfolio_backtest(predictions: Dict[str, pd.Series],
                 with open(stats_path, 'w', encoding='utf-8') as f:
                     json.dump(stats_to_save, f, indent=2, ensure_ascii=False, default=str)
                 print(f"   ✅ 回测统计已保存: {stats_path}")
+                
+                # 重命名图表文件（compare_modes 内部生成 backtest_ab_comparison.png）
+                default_plot = os.path.join(output_dir, 'backtest_ab_comparison.png')
+                task_plot = os.path.join(output_dir, f'{task_type}_backtest_comparison.png')
+                
+                if os.path.exists(default_plot):
+                    # 重命名为带任务类型的文件名
+                    if os.path.exists(task_plot):
+                        os.remove(task_plot)
+                    os.rename(default_plot, task_plot)
+                    print(f"   ✅ 回测图表已保存: {task_plot}")
+                else:
+                    print(f"   ⚠️ 图表文件未生成: {default_plot}")
                 
             else:
                 # 单模式回测
