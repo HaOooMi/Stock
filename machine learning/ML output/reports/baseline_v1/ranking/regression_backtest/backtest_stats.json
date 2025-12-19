@@ -1,0 +1,19 @@
+{
+  "Total Days": 1646,
+  "Total Return": 1.0877830971205826,
+  "Annualized Return": 0.119291810748821,
+  "Annualized Volatility": 0.2693500631696068,
+  "Sharpe Ratio": 0.36863481515613394,
+  "Sortino Ratio": 0.5123926986252668,
+  "Calmar Ratio": 0.29197723019064126,
+  "Max Drawdown": -0.4085654578986573,
+  "Win Rate": 0.5328068043742406,
+  "Profit/Loss Ratio": 0.9660411090129163,
+  "Avg Daily Turnover": 0.01328473066018631,
+  "Total Cost": 0.05685333333333333,
+  "Benchmark Return": 0.05962430206060598,
+  "Excess Return": 0.05966750868821502,
+  "Alpha (Annual)": 0.1495662582918399,
+  "Beta": -0.006519631150807316,
+  "Information Ratio": 0.16341623363116006
+}

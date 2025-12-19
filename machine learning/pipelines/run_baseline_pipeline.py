@@ -15,7 +15,7 @@ Baseline 模型训练管道 - Learning-to-Rank 三条线对比
 4. 三条线模型训练
 5. 横截面评估（CrossSectionAnalyzer）
 6. 模型预测漂移检测（IC/Spread）- 训练后
-7. 组合回测（SimplePortfolioBacktester）- A/B 测试对比执行模式
+7. 组合回测（SimplePortfolioBacktester v2.0）- Open-to-Open 执行
 8. 结果对比与报告
 
 使用方法：
@@ -28,18 +28,21 @@ Baseline 模型训练管道 - Learning-to-Rank 三条线对比
 
 输出：
     /ML output/reports/baseline_v1/ranking/
-    ├── model_comparison.json              # 三条线对比结果
-    ├── feature_drift_report.json          # 特征分布漂移检测（PSI）
-    ├── prediction_drift_report.json       # 模型预测漂移检测（IC/Spread）
+    ├── model_comparison.json                  # 三条线对比结果
+    ├── feature_drift_report.json              # 特征分布漂移检测（PSI）
+    ├── prediction_drift_report.json           # 模型预测漂移检测（IC/Spread）
     ├── regression_results.json
     ├── regression_rank_results.json
     ├── lambdarank_results.json
     ├── {task_type}_predictions.parquet
     ├── {task_type}_model.pkl
-    ├── {task_type}_backtest_stats.json    # 回测统计结果
-    └── {task_type}_comparison_*.png       # 回测净值曲线图（A/B 对比）
+    ├── {task_type}_backtest.png               # 回测图表（净值/回撤/热力图/换手）
+    └── {task_type}_backtest/                  # 回测详细产物
+        ├── portfolio_weights.parquet          # 持仓权重
+        ├── daily_returns.parquet              # 日收益率
+        └── backtest_stats.json                # 统计指标
 
-创建: 2025-12-04 | 版本: v1.2
+创建: 2025-12-04 | 更新: 2025-12-19 | 版本: v2.0
 """
 
 import os
@@ -816,27 +819,25 @@ def run_prediction_drift_detection(predictions: Dict[str, pd.Series],
 def run_portfolio_backtest(predictions: Dict[str, pd.Series],
                            prices: pd.DataFrame,
                            output_dir: str,
-                           top_k: int = 30,
-                           compare_modes: bool = True) -> Dict:
+                           config: dict,
+                           top_k: int = 30) -> Dict:
     """
     运行组合回测（阶段二：闭环回测）
     
-    支持 A/B 测试：
-    - Close-to-Close (理想情况，有前视偏差)
-    - Open-to-Open (现实情况，T+1 执行)
+    执行模式：Open-to-Open (T+1 开盘执行)
     
     Parameters:
     -----------
     predictions : Dict[str, pd.Series]
         各任务类型的预测结果 {task_type: pred_series}
     prices : pd.DataFrame
-        价格数据，MultiIndex [date, ticker]，必须包含 'open' 和 'close' 列
+        价格数据，MultiIndex [date, ticker]，必须包含 'open' 列
     output_dir : str
         输出目录
+    config : dict
+        配置字典
     top_k : int
         Top-K 选股数量
-    compare_modes : bool
-        是否对比两种执行模式
         
     Returns:
     --------
@@ -844,20 +845,118 @@ def run_portfolio_backtest(predictions: Dict[str, pd.Series],
         各任务类型的回测结果
     """
     print("\n" + "=" * 70)
-    print("组合回测 (Simple Portfolio Backtest)")
+    print("组合回测 (Simple Portfolio Backtest - Open-to-Open)")
     print("=" * 70)
     
     if prices is None:
         print("⚠️ 价格数据为空，跳过回测")
-        print("   提示：请确保 DataLoader 加载了包含 'open' 和 'close' 列的价格数据")
+        print("   提示：请确保 DataLoader 加载了包含 'open' 列的价格数据")
         return {}
     
     # 检查价格数据是否包含必要列
-    required_cols = ['open', 'close']
-    missing_cols = [col for col in required_cols if col not in prices.columns]
-    if missing_cols:
-        print(f"⚠️ 价格数据缺少列: {missing_cols}，跳过回测")
+    if 'open' not in prices.columns:
+        print(f"⚠️ 价格数据缺少 'open' 列，跳过回测")
         return {}
+    
+    # 获取回测配置（安全访问，兼容不同配置对象类型）
+    try:
+        backtest_config = config.get('backtest', {}) if hasattr(config, 'get') else config.get('backtest', {})
+        if not isinstance(backtest_config, dict):
+            backtest_config = dict(backtest_config) if backtest_config else {}
+    except:
+        backtest_config = {}
+    
+    rebalance_freq = backtest_config.get('rebalance_freq', '1M') if isinstance(backtest_config, dict) else '1M'
+    weighting = backtest_config.get('weighting', 'equal') if isinstance(backtest_config, dict) else 'equal'
+    
+    # ===== 加载基准数据 =====
+    benchmark = None
+    
+    # 检查基准配置
+    if isinstance(backtest_config, dict):
+        benchmark_cfg = backtest_config.get('benchmark', {})
+        
+        # 兼容两种配置格式
+        if isinstance(benchmark_cfg, dict):
+            # 新格式: benchmark: {use_equal_weight: true}
+            use_equal_weight = benchmark_cfg.get('use_equal_weight', False)
+            benchmark_symbol = benchmark_cfg.get('symbol', None)
+            benchmark_file = benchmark_cfg.get('file', None)
+        elif isinstance(benchmark_cfg, str):
+            # 旧格式: benchmark: '000300'
+            use_equal_weight = False
+            benchmark_symbol = benchmark_cfg
+            benchmark_file = backtest_config.get('benchmark_file', None)
+        else:
+            use_equal_weight = False
+            benchmark_symbol = None
+            benchmark_file = None
+        
+        # 方式1: 使用全体等权基准
+        if use_equal_weight:
+            print(f"\n📊 构建全体等权基准...")
+            try:
+                # 计算所有股票的等权收益
+                all_tickers = prices.index.get_level_values('ticker').unique()
+                print(f"   包含 {len(all_tickers)} 只股票")
+                
+                # 提取所有股票的收盘价
+                close_prices = prices['close'].unstack('ticker')
+                
+                # 计算每日等权收益
+                daily_returns = close_prices.pct_change().fillna(0)
+                equal_weight_ret = daily_returns.mean(axis=1)  # 等权平均
+                
+                # 计算净值曲线
+                benchmark = (1 + equal_weight_ret).cumprod()
+                print(f"   ✅ 全体等权基准构建完成: {len(benchmark)} 条记录")
+                print(f"   累计收益: {(benchmark.iloc[-1] - 1):.2%}")
+            except Exception as e:
+                print(f"   ⚠️ 等权基准构建失败: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # 方式2: 使用指定指数代码
+        elif benchmark_symbol:
+            print(f"\n📊 加载基准指数: {benchmark_symbol}")
+            try:
+                available_tickers = prices.index.get_level_values('ticker').unique().tolist()
+                print(f"   可用ticker数量: {len(available_tickers)}")
+                print(f"   前10个ticker: {available_tickers[:10]}")
+                
+                if benchmark_symbol in available_tickers:
+                    benchmark_prices = prices.xs(benchmark_symbol, level='ticker')
+                    if 'close' in benchmark_prices.columns:
+                        benchmark_ret = benchmark_prices['close'].pct_change().fillna(0)
+                        benchmark = (1 + benchmark_ret).cumprod()
+                        print(f"   ✅ 从价格数据中提取基准: {len(benchmark)} 条记录")
+                    elif 'open' in benchmark_prices.columns:
+                        benchmark_ret = benchmark_prices['open'].pct_change().fillna(0)
+                        benchmark = (1 + benchmark_ret).cumprod()
+                        print(f"   ✅ 从价格数据中提取基准: {len(benchmark)} 条记录")
+                else:
+                    print(f"   ⚠️ ticker '{benchmark_symbol}' 不在prices中")
+                    
+            except Exception as e:
+                print(f"   ⚠️ 基准加载失败: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # 方式3: 从文件加载
+        if benchmark is None and benchmark_file and os.path.exists(benchmark_file):
+            print(f"\n📊 从文件加载基准: {benchmark_file}")
+            try:
+                benchmark_df = pd.read_parquet(benchmark_file)
+                if isinstance(benchmark_df, pd.DataFrame):
+                    benchmark = benchmark_df.iloc[:, 0]
+                else:
+                    benchmark = benchmark_df
+                print(f"   ✅ 基准加载成功: {len(benchmark)} 条记录")
+            except Exception as e:
+                print(f"   ⚠️ 文件加载失败: {e}")
+    
+    if benchmark is None:
+        print(f"\n⚠️ 未配置或加载基准数据，将不进行基准对比")
     
     all_backtest_results = {}
     
@@ -865,58 +964,37 @@ def run_portfolio_backtest(predictions: Dict[str, pd.Series],
         print(f"\n📊 回测 {task_type}...")
         
         try:
-            backtester = SimplePortfolioBacktester(top_k=top_k)
+            # 创建回测器（新版：只支持 Open-to-Open）
+            backtester = SimplePortfolioBacktester(
+                top_k=top_k,
+                rebalance_freq=rebalance_freq,
+                weighting=weighting
+            )
             
-            if compare_modes:
-                # A/B 测试：对比两种执行模式
-                print(f"   执行 A/B 测试（Close-to-Close vs Open-to-Open）...")
-                result = backtester.compare_modes(
-                    predictions=pred_series,
-                    prices=prices,
-                    save_dir=output_dir
-                )
-                all_backtest_results[task_type] = result
+            # 运行回测
+            task_save_dir = os.path.join(output_dir, f'{task_type}_backtest')
+            os.makedirs(task_save_dir, exist_ok=True)
+            
+            result = backtester.run(
+                predictions=pred_series,
+                prices=prices,
+                benchmark=benchmark,
+                save_dir=task_save_dir
+            )
+            all_backtest_results[task_type] = result
+            
+            # 绘制图表
+            plot_path = os.path.join(output_dir, f'{task_type}_backtest.png')
+            backtester.plot(result, save_path=plot_path)
+            all_backtest_results[task_type] = result
                 
-                # 保存统计结果
-                stats_path = os.path.join(output_dir, f'{task_type}_backtest_stats.json')
-                stats_to_save = {
-                    'close_to_close': result['close_to_close']['stats'],
-                    'open_to_open': result['open_to_open']['stats'],
-                    'comparison': {k: float(v) if isinstance(v, (np.floating, float)) else v 
-                                   for k, v in result['comparison'].items() 
-                                   if not isinstance(v, dict)}
-                }
-                with open(stats_path, 'w', encoding='utf-8') as f:
-                    json.dump(stats_to_save, f, indent=2, ensure_ascii=False, default=str)
-                print(f"   ✅ 回测统计已保存: {stats_path}")
-                
-                # 重命名图表文件（compare_modes 内部生成 backtest_ab_comparison.png）
-                default_plot = os.path.join(output_dir, 'backtest_ab_comparison.png')
-                task_plot = os.path.join(output_dir, f'{task_type}_backtest_comparison.png')
-                
-                if os.path.exists(default_plot):
-                    # 重命名为带任务类型的文件名
-                    if os.path.exists(task_plot):
-                        os.remove(task_plot)
-                    os.rename(default_plot, task_plot)
-                    print(f"   ✅ 回测图表已保存: {task_plot}")
-                else:
-                    print(f"   ⚠️ 图表文件未生成: {default_plot}")
-                
-            else:
-                # 单模式回测
-                result = backtester.run(pred_series, prices)
-                all_backtest_results[task_type] = result
-                
-                # 绘制并保存图表
-                plot_path = os.path.join(output_dir, f'{task_type}_backtest.png')
-                backtester.plot(result, save_path=plot_path)
-                
+            
         except Exception as e:
             print(f"   ❌ {task_type} 回测失败: {e}")
             import traceback
             traceback.print_exc()
     
+    print("\n✅ 所有回测完成")
     return all_backtest_results
 
 
@@ -1082,8 +1160,8 @@ def main():
                 predictions=all_predictions,
                 prices=prices,
                 output_dir=output_dir,
-                top_k=args.backtest_top_k,
-                compare_modes=True  # 默认进行 A/B 测试
+                config=config,
+                top_k=args.backtest_top_k
             )
     
     print("\n" + "=" * 70)

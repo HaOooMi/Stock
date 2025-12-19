@@ -125,25 +125,32 @@ results = analyzer.get_results()
 - **Top-Mean Spread**：头部股票超额收益
 - **IC 正比例**：正 IC 天数占比
 
-### 步骤 7: 组合回测（Open-to-Open）
+### 步骤 7: 组合回测（Open-to-Open, v2.0）
 
 ```python
 backtester = SimplePortfolioBacktester(
+    top_k=20,
+    rebalance_freq='1M',      # 调仓频率：'1D', '1W', '1M'
+    weighting='equal'          # 权重方式：'equal', 'score_weighted'
+)
+result = backtester.run(
     predictions=predictions,
     prices=prices,
-    top_n=20,
-    rebalance_freq='1M',
-    execution_mode='open_to_open'  # T+1 开盘执行
+    save_dir=output_dir        # 自动保存 weights/returns/stats
 )
-backtest_results = backtester.run_backtest()
-backtester.plot_results(save_dir=output_dir)
+backtester.plot(result, save_path='backtest.png')
 ```
 
 **回测设计**：
-- **选股规则**：每期选 Top-N 预测分数最高的股票
-- **权重方案**：等权配置（1/N）
-- **调仓频率**：月度调仓（月初第一个交易日）
-- **执行假设**：
+- **选股规则**：每期选 Top-K 预测分数最高的股票
+- **权重方案**：
+  - `equal`: 等权配置（1/K）
+  - `score_weighted`: 按分数加权（softmax）
+- **调仓频率**：
+  - `'1D'`: 每日调仓
+  - `'1W'`: 每周调仓（周一）
+  - `'1M'`: 每月调仓（月初第一个交易日）
+- **执行假设**（固定 Open-to-Open）：
   - T 日收盘生成信号
   - T+1 日开盘执行交易（符合 A 股 T+1 制度）
   - 持有至下次调仓
@@ -151,23 +158,25 @@ backtester.plot_results(save_dir=output_dir)
 **绩效指标**：
 - **年化收益率**：几何平均收益
 - **波动率**：收益率标准差（年化）
-- **夏普比率**：超额收益 / 波动率
+- **夏普比率 / Sortino / Calmar**：风险调整后收益
 - **最大回撤**：峰谷跌幅
-- **Alpha / Beta**：相对基准的超额收益与系统风险
-- **胜率**：正收益期数占比
+- **Alpha / Beta**：CAPM 回归得到的超额收益与系统风险
+- **信息比率**：超额收益的稳定性
+- **胜率 / 盈亏比**：交易统计
 
-**输出图表**：
+**输出图表**（4 子图）：
+- 净值曲线（策略 + 基准对比）
+- 回撤曲线（策略 vs 基准）
+- 月度收益热力图（Year × Month）
+- 换手率与累计成本（双坐标轴）
 
-*A/B 对比模式*（默认）：
-- 净值曲线对比（Close-to-Close vs Open-to-Open）
-- 回撤对比
-- 关键指标对比柱状图（年化收益、夏普比率）
-- Alpha 衰减分析饼图
-
-*单模式*：
-- 净值曲线（可选基准对比）
-- 回撤曲线
-- 换手率柱状图
+**自动保存产物**：
+```
+{task_type}_backtest/
+├── portfolio_weights.parquet    # 每日持仓权重
+├── daily_returns.parquet        # 毛收益/净收益/成本/换手
+└── backtest_stats.json          # 完整统计指标
+```
 
 ### 步骤 8: 结果对比
 
@@ -219,9 +228,17 @@ ML output/reports/baseline_v1/ranking/
 ├── regression_model.pkl                 # Baseline A 模型
 ├── regression_rank_model.pkl
 ├── lambdarank_model.pkl
-├── regression_backtest_comparison.png   # A/B 对比图表
-├── regression_rank_backtest_comparison.png
-└── lambdarank_backtest_comparison.png
+├── regression_backtest.png              # 回测图表（4子图）
+├── regression_rank_backtest.png
+├── lambdarank_backtest.png
+├── regression_backtest/
+│   ├── portfolio_weights.parquet
+│   ├── daily_returns.parquet
+│   └── backtest_stats.json
+├── regression_rank_backtest/
+│   └── ...
+└── lambdarank_backtest/
+    └── ...
 ```
 
 ## ⚙️ 配置示例
@@ -309,31 +326,77 @@ models:
 - 如果 **C > B**：说明 LambdaRank 的 pairwise 优化有优势
 - 如果 **A ≈ B ≈ C**：说明当前因子预测能力有限，模型选择不敏感
 
-## 🎯 回测执行模式详解
+## 📊 基准配置
 
-### Open-to-Open vs Close-to-Close
+回测支持三种基准对比方式：
 
-**Open-to-Open（推荐）**：
+### 1. 全体等权基准（推荐）
+
+使用所有股票的平均收益作为基准：
+
+```yaml
+backtest:
+  benchmark:
+    use_equal_weight: true
 ```
-T 日收盘 → 生成信号 → T+1 日开盘买入 → T+N 日开盘卖出
-```
-- ✅ 符合 A 股 T+1 制度
-- ✅ 信号产生与执行有充足时间差
-- ✅ 避免收盘价竞价博弈
-- ❌ 隔夜风险敞口
 
-**Close-to-Close（理论测试）**：
-```
-T 日收盘 → 生成信号 → T 日收盘买入 → T+N 日收盘卖出
-```
-- ⚠️ 不符合实际交易（T 日收盘无法根据 T 日信息交易）
-- ⚠️ 仅用于理论对比或 A/B Testing
+**优点**：
+- ✅ 无需额外数据
+- ✅ 反映整体市场表现
+- ✅ 最公平的对比基准
 
-**为什么选择 Open-to-Open？**
+### 2. 指数基准
 
-1. **真实可执行**：T 日收盘后有充足时间计算信号，T+1 日开盘挂单
-2. **避免前视偏差**：使用 T 日收盘数据预测 T+1 日开盘后的收益
-3. **行业标准**：多数量化机构采用此模式
+使用指定指数（如沪深300）作为基准：
+
+```yaml
+backtest:
+  benchmark:
+    symbol: '000300'  # 沪深300指数代码
+```
+
+**前提**：prices 数据中必须包含该指数的价格数据。
+
+### 3. 文件加载基准
+
+从独立文件加载基准数据：
+
+```yaml
+backtest:
+  benchmark:
+    file: 'path/to/benchmark.parquet'
+```
+
+**文件格式**：Parquet 文件，包含日期索引和价格/净值列。
+
+### 基准对比指标
+
+配置基准后，回测会自动计算：
+- **Alpha (Annual)**：相对基准的超额年化收益
+- **Beta**：策略与基准的系统性风险暴露
+- **Information Ratio**：超额收益的稳定性 (Alpha / Tracking Error)
+- **Excess Returns**：每日超额收益序列
+
+图表将显示策略与基准的净值对比、回撤对比等。
+
+## 🎯 回测执行模式说明
+
+### Open-to-Open（固定模式）
+
+```
+T 日收盘 → 生成信号 → T+1 日开盘买入 → T+1+H 日开盘卖出
+```
+
+**设计原因**：
+- ✅ **符合 A 股 T+1 制度**：T 日收盘后有充足时间计算信号，T+1 日开盘挂单
+- ✅ **避免前视偏差**：使用 T 日收盘数据预测 T+1 日开盘后的收益
+- ✅ **行业标准**：多数量化机构采用此模式
+- ✅ **无需对比测试**：直接反映真实可执行的收益
+
+**关键参数**：
+- `rebalance_freq`: 调仓频率（降低换手成本）
+- `weighting`: 权重方式（等权 vs 分数加权）
+- `top_k`: 选股数量（平衡分散与集中）
 
 ## 📝 注意事项
 
@@ -344,12 +407,13 @@ T 日收盘 → 生成信号 → T 日收盘买入 → T+N 日收盘卖出
 5. **价格数据**：回测需要加载开盘价和收盘价数据（从 InfluxDB）
 6. **交易成本**：默认 0.1% 单边成本，可根据实际调整
 7. **停牌处理**：停牌股票自动剔除选股池
+8. **基准对比**：建议使用等权基准，无需额外配置指数数据
 
 ## 🐛 常见问题
 
 **Q: 回测净值曲线为什么不平滑？**
 
-A: 检查调仓频率设置，月度调仓会产生阶梯状净值曲线。如需平滑可改为周度或日度。
+A: 调仓频率越低（如月度），净值曲线越呈阶梯状。这是正常现象，反映了真实的调仓节奏。如需更平滑的曲线，可将 `rebalance_freq` 改为 `'1W'` 或 `'1D'`，但会增加交易成本。
 
 **Q: 为什么回测收益与 IC 不成正比？**
 
@@ -369,3 +433,17 @@ A:
 2. 控制换手率（降低调仓频率）
 3. 风险中性化（行业中性、市值中性）
 4. 多期验证（滚动回测）
+
+**Q: 等权基准 vs 沪深300，选哪个？**
+
+A:
+- **等权基准**：适合全市场选股策略，反映整体股票池表现
+- **沪深300**：适合大盘股策略，对标市场主流指数
+- 如果选股范围覆盖全市场，推荐使用等权基准更公平
+
+**Q: 为什么配置了指数代码但没显示基准？**
+
+A: 检查以下几点：
+1. prices 数据中是否包含该指数的ticker
+2. 查看终端输出的调试信息（"可用ticker数量"）
+3. 确认 data.symbol 配置中是否添加了该指数代码

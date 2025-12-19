@@ -12,7 +12,7 @@
 | **工业级数据管理** | 版本化快照、PIT 对齐、7 层可交易性过滤 |
 | **三条线对比** | Regression / Reg-on-Rank / LambdaRank 对比实验 |
 | **漂移监控** | PSI 特征漂移 + IC/Spread 预测漂移双重检测 |
-| **无偏回测** | Open-to-Open 执行假设，符合 A 股 T+1 制度 |
+| **无偏回测** | Open-to-Open 执行模式，符合 A 股 T+1 制度 |
 
 ---
 
@@ -27,7 +27,7 @@
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                        因子工程层                                │
-│  FeatureEngineering + FactorFactory (5 大类 40+ 因子)          │
+│  FeatureEngineer + FactorFactory (5 大类因子)                  │
 │       → Winsorize → Standardize → Neutralize (市值+行业)       │
 │       → IC/ICIR 质量检查 → FactorLibraryManager (入库)         │
 └─────────────────────────────────────────────────────────────────┘
@@ -41,7 +41,7 @@
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                        评估回测层                                │
-│  Bucketing → CrossSectionMetrics → SimpleBacktest              │
+│  Bucketing → CrossSectionAnalyzer → SimplePortfolioBacktester  │
 │       → Tearsheet (HTML 报告 + 可视化图表)                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -52,80 +52,102 @@
 
 ### data/ - 数据处理层
 
-| 模块 | 功能 |
-|------|------|
-| `data_loader.py` | 统一数据接口，集成快照管理、交易过滤、PIT 对齐 |
-| `data_snapshot.py` | 版本化数据快照（格式：`ds_2025Q4_v1`），含完整性校验 |
-| `market_data_loader.py` | InfluxDB 行情加载 + MySQL 元数据加载 |
-| `time_series_cv.py` | Purge + Embargo 时序切分，支持 Walk-Forward |
-| `tradability_filter.py` | 7 层过滤：ST/停牌/涨跌停/上市龄/成交量/价格/换手率 |
-| `pit_aligner.py` | 财务数据 PIT 对齐：公告日 + 滞后生效 + 前复权 |
-| `financial_data_loader.py` | 季度财务报表加载 |
+| 模块 | 类/功能 |
+|------|---------|
+| `data_loader.py` | `DataLoader` - 统一数据接口，集成快照管理、交易过滤、PIT 对齐 |
+| `data_snapshot.py` | `DataSnapshot` - 版本化数据快照（格式：`ds_2025Q4_v1`），含完整性校验 |
+| `market_data_loader.py` | `MarketDataLoader` - InfluxDB 行情加载 |
+| `financial_data_loader.py` | `FinancialDataLoader` - 季度财务报表加载 |
+| `time_series_cv.py` | `TimeSeriesCV` - Purge + Embargo 时序切分 |
+| `tradability_filter.py` | `TradabilityFilter` - 7 层过滤：ST/停牌/涨跌停/上市龄/成交量/价格/换手率 |
+| `pit_aligner.py` | `PITDataAligner` - 财务数据 PIT 对齐：公告日 + 滞后生效 + 前复权 |
 
 ### features/ - 因子工程层
 
-| 模块 | 功能 |
-|------|------|
-| `feature_engineering.py` | 基础特征工程：技术指标生成 + 特征选择 + 标准化 |
-| `factor_factory.py` | 高级因子工厂：5 大因子族（动量/波动率/量价/风格/质量），含文献引用 |
-| `factor_library_manager.py` | 因子库版本控制 + 入库标准 + 因子清单维护 |
+| 模块 | 类/功能 |
+|------|---------|
+| `feature_engineering.py` | `FeatureEngineer` - 基础特征工程：技术指标生成 + 特征选择 + 标准化 |
+| `factor_factory.py` | `FactorFactory` - 高级因子工厂：5 大因子族，含文献引用 |
+| `factor_library_manager.py` | `FactorLibraryManager` - 因子库版本控制 + 入库标准 + 因子清单维护 |
 
-**因子族覆盖**：
+**因子工厂方法（FactorFactory）**：
 
-| 因子族 | 示例因子 | 数量 |
-|--------|----------|------|
-| 动量 | ROC_5/10/20/60/120、相对强弱、动量反转 | 10+ |
-| 波动率 | ATR、波动率偏度、上下行波动率比 | 8+ |
-| 量价 | 换手率、成交量变化、量价背离 | 8+ |
-| 风格 | 市值对数、换手率排名、波动率排名 | 6+ |
-| 质量 | ROE 稳定性、毛利率变化、财务健康度 | 8+ |
+| 方法 | 因子族 | 说明 |
+|------|--------|------|
+| `calc_roc_family()` | 动量 | ROC_5/10/20/60/120 |
+| `calc_price_to_sma()` | 动量 | 价格偏离均线 |
+| `calc_long_short_momentum()` | 动量 | 长动量-短反转复合 |
+| `calc_rank_momentum()` | 动量 | 排名动量 |
+| `calc_realized_volatility()` | 波动率 | 已实现波动率 |
+| `calc_parkinson_volatility()` | 波动率 | Parkinson 波动率 |
+| `calc_garman_klass_volatility()` | 波动率 | Garman-Klass 波动率 |
+| `calc_return_skewness_kurtosis()` | 波动率 | 收益偏度/峰度 |
+| `calc_turnover_factors()` | 量价 | 换手率因子 |
+| `calc_volume_price_correlation()` | 量价 | 量价相关性 |
+| `calc_vwap_deviation()` | 量价 | VWAP 偏离度 |
+| `calc_amihud_illiquidity()` | 量价 | Amihud 非流动性 |
+| `calc_price_range_factors()` | 量价 | 价格区间因子 |
+| `calc_v1_core_factors()` | 核心 | A 股特化因子（反转/低波/反博彩） |
 
 ### targets/ - 标签处理层
 
-| 模块 | 功能 |
-|------|------|
-| `target_engineering.py` | 生成未来收益率、分类标签、防泄漏处理 |
-| `ranking_labels.py` | LambdaRank 分桶标签生成 |
-| `label_transformer.py` | 收益率变换：GaussRank、残差化、排名化 |
+| 模块 | 类/功能 |
+|------|---------|
+| `target_engineering.py` | `TargetEngineer` - 生成未来收益率、分类标签、防泄漏处理 |
+| `ranking_labels.py` | `RankingLabelFactory` - LambdaRank 分桶标签生成（GaussRank/分箱） |
+| `label_transformer.py` | `LabelTransformer` - 收益率变换：GaussRank、残差化、排名化 |
 
 ### models/ - 模型层
 
-| 模块 | 功能 |
-|------|------|
-| `base_model.py` | 统一接口：fit / predict / save / load |
-| `lgbm_model.py` | LightGBM 回归：梯度提升树 + 早停 + 特征重要性 |
-| `lgbm_ranker.py` | LightGBM LambdaRank：直接优化 NDCG 排序指标 |
-| `ridge_model.py` | Ridge 回归：L2 正则化线性模型 |
-| `rf_model.py` | 随机森林：Bagging 集成树 |
+| 模块 | 类/功能 |
+|------|---------|
+| `base_model.py` | `BaseModel` - 抽象基类，统一接口：fit / predict / save / load |
+| `lgbm_model.py` | `LightGBMModel` - LightGBM 回归：梯度提升树 + 早停 + 特征重要性 |
+| `lgbm_ranker.py` | `LightGBMRanker` - LightGBM LambdaRank：直接优化 NDCG 排序指标 |
+| `ridge_model.py` | `RidgeModel` - Ridge 回归：L2 正则化线性模型 |
+| `rf_model.py` | `RandomForestModel` - 随机森林：Bagging 集成树 |
+| `transformers/pca.py` | `PCAStateGenerator` - PCA 降维状态生成器 |
 
 ### evaluation/ - 评估层
 
-| 模块 | 功能 |
-|------|------|
-| `cross_section_analyzer.py` | 横截面分析器：封装 IC/ICIR/Spread/单调性计算 |
-| `cross_section_metrics.py` | 核心度量：Forward Returns、Rank IC、分桶收益 |
-| `factor_preprocessing.py` | 因子预处理：Winsorize + Z-score + 市值行业中性化 |
-| `drift_detector.py` | 漂移检测：PSI 分布漂移 + IC/Spread 预测漂移 |
-| `bucketing.py` | 按日横截面分桶 + 分桶表现分析 |
-| `tearsheet.py` | HTML Tearsheet 报告生成 |
-| `visualization.py` | 可视化图表：净值曲线、IC 时序、分桶收益 |
+| 模块 | 类/功能 |
+|------|---------|
+| `cross_section_analyzer.py` | `CrossSectionAnalyzer` - 横截面分析器：封装 IC/ICIR/Spread/单调性计算 |
+| `cross_section_adapter.py` | `CrossSectionAdapter` - 横截面数据适配器 |
+| `cross_section_metrics.py` | 核心度量函数：`calculate_forward_returns()`、Rank IC、分桶收益 |
+| `factor_preprocessing.py` | 因子预处理函数：`winsorize_factor()`、`standardize_factor()`、中性化 |
+| `drift_detector.py` | `DriftDetector` - 漂移检测：PSI 分布漂移 + IC/Spread 预测漂移 |
+| `bucketing.py` | 分桶函数：`bucket_predictions()` - 按日横截面分桶 |
+| `metrics.py` | 基础指标函数：`calculate_metrics()`、`calculate_ic_by_date()` |
+| `tearsheet.py` | HTML Tearsheet 报告生成：`generate_html_tearsheet()` |
+| `visualization.py` | 可视化函数：IC 时序、分桶收益、Spread 累计、换手率、月度热力图 |
+| `reporting.py` | 报告生成：`generate_report()` |
+| `cluster/cluster_evaluate.py` | `ClusterEvaluator` - K-means 聚类评估 + 聚类收益分析 |
 
 ### backtest/ - 回测层
 
-| 模块 | 功能 |
-|------|------|
-| `simple_backtest.py` | Top-N 策略回测：等权组合 + 交易成本 + 绩效统计 |
-| `top_bucket_backtest.py` | 分桶策略回测：选择预测最高桶构建组合 |
-| `cluster_strategy_backtest.py` | 聚类信号策略：基于 PCA 降维 + K-means 聚类 |
+| 模块 | 类/功能 |
+|------|---------|
+| `simple_backtest.py` | `SimplePortfolioBacktester` - Top-K 策略回测（v2.0）：等权/分数加权 + 调仓频率 + 基准对比 + 交易成本 |
+| `top_bucket_backtest.py` | `StrategyBacktest` - 分桶策略回测：选择预测最高桶构建组合 |
+| `cluster_strategy_backtest.py` | `StrategyBacktest` - 聚类信号策略：基于聚类标签构建组合 |
 
 ### pipelines/ - 执行管道
 
 | 模块 | 功能 |
 |------|------|
-| `run_baseline_pipeline.py` | 主训练管道：三条线对比（回归/Reg-on-Rank/LambdaRank） |
+| `run_baseline_pipeline.py` | 主训练管道：三条线对比（回归/Reg-on-Rank/LambdaRank）+ 横截面评估 + 回测 |
 | `prepare_factors.py` | 因子准备：生成 → 质量检查 → IC 评估 → 入库 |
+| `prepare_data.py` | 数据准备（无快照） |
 | `prepare_data_with_snapshot.py` | 数据准备 + 快照创建 |
-| `main.py` | 统一入口：串联所有管道 |
+| `run_cluster_analysis.py` | 聚类分析运行脚本 |
+| `run_pca_state.py` | PCA 降维分析运行脚本 |
+
+### 根目录
+
+| 模块 | 功能 |
+|------|------|
+| `main.py` | `MLPipeline` - 统一入口：串联 prepare_data → prepare_factors → train |
 
 ---
 
@@ -206,23 +228,25 @@ PSI = Σ (actual_pct - expected_pct) × ln(actual_pct / expected_pct)
 | Top-Mean Spread | mean(Top桶收益) - mean(全体收益) | 头部超额收益 |
 | 单调性 | 分桶收益是否单调递增 | 因子有效性验证 |
 
-### 6. 回测执行模式
+### 6. 回测执行模式（v2.0）
 
-**Open-to-Open（推荐，无偏差）**：
+**Open-to-Open（固定模式）**：
 
 ```
-T 日收盘 → 计算信号 → T+1 日开盘买入 → T+N 日开盘卖出
+T 日收盘 → 计算信号 → T+1 日开盘买入 → T+H 日开盘卖出
 ```
 
 - ✅ 符合 A 股 T+1 制度
 - ✅ 信号与执行有充足时间差
 - ✅ 避免收盘竞价博弈
 
-**Close-to-Close（仅理论测试）**：
-
-```
-T 日收盘 → 计算信号 → T 日收盘买入（有前视偏差）
-```
+**回测器功能**（`SimplePortfolioBacktester`）：
+- **选股规则**：Top-K 预测分数最高的股票
+- **权重方式**：等权（1/K）或分数加权（softmax）
+- **调仓频率**：日度（1D）/ 周度（1W）/ 月度（1M）
+- **交易成本**：佣金 + 印花税 + 滑点
+- **基准对比**：支持等权基准或指数基准，计算 Alpha/Beta/IR
+- **输出图表**：净值曲线、回撤、月度热力图、换手率
 
 ---
 
@@ -255,13 +279,6 @@ data:
     org: "stock"
     bucket: "stock_kdata"
     token: "YOUR_TOKEN"
-    
-  mysql:
-    host: "localhost"
-    port: 3306
-    user: "root"
-    password: "YOUR_PASSWORD"
-    database: "stock_meta"
 ```
 
 ### 3. 运行完整流程
@@ -293,6 +310,12 @@ python pipelines/prepare_factors.py
 
 # 训练 + 评估 + 回测
 python pipelines/run_baseline_pipeline.py --compare_all --skip_drift
+
+# 聚类分析
+python pipelines/run_cluster_analysis.py
+
+# PCA 降维
+python pipelines/run_pca_state.py
 ```
 
 ---
@@ -321,10 +344,14 @@ ML output/
 │       ├── model_comparison.json
 │       ├── drift_report.json
 │       ├── factor_ic_report.json
-│       └── backtest_stats.json
+│       ├── regression_backtest/
+│       │   ├── portfolio_weights.parquet
+│       │   ├── daily_returns.parquet
+│       │   └── backtest_stats.json
+│       └── ...
 └── figures/            # 可视化图表
     └── baseline_v1/
-        ├── net_value.png
+        ├── regression_backtest.png
         ├── ic_timeseries.png
         ├── bucket_returns.png
         └── drawdown.png
@@ -345,10 +372,10 @@ lambdarank            0.0316      0.2101     3.34        0.0035
 **回测绩效**：
 
 ```
-策略              年化收益   波动率    夏普比率   最大回撤   Alpha
-──────────────────────────────────────────────────────────────────
-Top-20 等权       12.5%     18.3%     0.68      -22.1%    8.2%
-基准（沪深300）    5.0%     20.5%     0.24      -35.2%    -
+策略              年化收益   波动率    夏普比率   最大回撤   Alpha    Beta
+──────────────────────────────────────────────────────────────────────────
+Top-20 等权       12.5%     18.3%     0.68      -22.1%    8.2%    0.85
+基准（等权）       5.0%     20.5%     0.24      -35.2%    -       1.00
 ```
 
 ---
@@ -359,15 +386,16 @@ Top-20 等权       12.5%     18.3%     0.68      -22.1%    8.2%
 
 | 配置段 | 说明 |
 |--------|------|
-| `data` | 股票池、日期范围、数据源连接、交易过滤参数 |
-| `features` | 预处理参数、因子工厂配置、质量检查阈值 |
+| `project` | 项目名称、版本、描述 |
+| `paths` | 各类输出目录配置 |
+| `data` | 股票池、日期范围、InfluxDB 连接、交易过滤参数、PIT 对齐 |
+| `features` | 预处理参数、因子工厂配置、中性化设置 |
 | `target` | 目标变量名、预测周期、收益类型 |
-| `execution` | 执行模式（open_to_open）、执行延迟 |
 | `split` | 训练/验证/测试比例、Purge/Embargo 天数 |
-| `ranking` | 任务类型、LambdaRank 分桶数、NDCG 评估位置 |
+| `ranking` | 任务类型、分桶数、NDCG 评估位置 |
 | `models` | 各模型参数（Ridge/RF/LightGBM/LGBMRanker） |
 | `evaluation` | 分桶数、评估指标列表 |
-| `backtest` | 策略类型、调仓周期、交易成本 |
+| `backtest` | 调仓频率、Top-K、交易成本、基准配置 |
 
 ---
 
@@ -406,7 +434,7 @@ Top-20 等权       12.5%     18.3%     0.68      -22.1%    8.2%
 **原因**：IC 衡量预测能力，回测受交易成本、流动性、极端行情影响
 
 **建议**：
-- 控制换手率（降低调仓频率）
+- 控制换手率（降低调仓频率至 1W 或 1M）
 - 增加选股数量（分散风险）
 - 行业中性化（避免风格暴露）
 
@@ -425,6 +453,12 @@ Top-20 等权       12.5%     18.3%     0.68      -22.1%    8.2%
 - 选股数量较少（Top-10/20）
 - 只关心头部排序质量
 - 原始收益分布极端
+
+### Q5: 回测净值曲线为什么不平滑？
+
+**原因**：调仓频率越低（如月度），净值曲线越呈阶梯状
+
+**解决**：这是正常现象，反映了真实的调仓节奏。如需更平滑可将 `rebalance_freq` 改为 `'1W'` 或 `'1D'`，但会增加交易成本。
 
 ---
 
