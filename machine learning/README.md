@@ -35,13 +35,13 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                        模型训练层                                │
 │  TimeSeriesCV (Purge+Embargo) → DriftDetector (PSI)            │
-│       → Ridge / RF / LightGBM / LGBMRanker                     │
+│       → LightGBM / LGBMRanker                                  │
 │       → DriftDetector (IC/Spread 预测漂移)                     │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                        评估回测层                                │
-│  Bucketing → CrossSectionAnalyzer → SimplePortfolioBacktester  │
+│  CrossSectionAnalyzer → SimplePortfolioBacktester              │
 │       → Tearsheet (HTML 报告 + 可视化图表)                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -95,7 +95,8 @@
 |------|---------|
 | `target_engineering.py` | `TargetEngineer` - 生成未来收益率、分类标签、防泄漏处理 |
 | `ranking_labels.py` | `RankingLabelFactory` - LambdaRank 分桶标签生成（GaussRank/分箱） |
-| `label_transformer.py` | `LabelTransformer` - 收益率变换：GaussRank、残差化、排名化 |
+
+> ⚠️ `label_transformer.py` 未被主流程使用，保留供扩展
 
 ### models/ - 模型层
 
@@ -104,56 +105,88 @@
 | `base_model.py` | `BaseModel` - 抽象基类，统一接口：fit / predict / save / load |
 | `lgbm_model.py` | `LightGBMModel` - LightGBM 回归：梯度提升树 + 早停 + 特征重要性 |
 | `lgbm_ranker.py` | `LightGBMRanker` - LightGBM LambdaRank：直接优化 NDCG 排序指标 |
-| `ridge_model.py` | `RidgeModel` - Ridge 回归：L2 正则化线性模型 |
-| `rf_model.py` | `RandomForestModel` - 随机森林：Bagging 集成树 |
-| `transformers/pca.py` | `PCAStateGenerator` - PCA 降维状态生成器 |
+
+> ⚠️ `ridge_model.py`、`rf_model.py` 仅被废弃的 `train_models（old）.py` 使用
+
+> ⚠️ `transformers/pca.py` 用于独立的 PCA 分析流程（`run_pca_state.py`），不在主流程中
 
 ### evaluation/ - 评估层
 
 | 模块 | 类/功能 |
 |------|---------|
 | `cross_section_analyzer.py` | `CrossSectionAnalyzer` - 横截面分析器：封装 IC/ICIR/Spread/单调性计算 |
-| `cross_section_adapter.py` | `CrossSectionAdapter` - 横截面数据适配器 |
 | `cross_section_metrics.py` | 核心度量函数：`calculate_forward_returns()`、Rank IC、分桶收益 |
 | `factor_preprocessing.py` | 因子预处理函数：`winsorize_factor()`、`standardize_factor()`、中性化 |
 | `drift_detector.py` | `DriftDetector` - 漂移检测：PSI 分布漂移 + IC/Spread 预测漂移 |
-| `bucketing.py` | 分桶函数：`bucket_predictions()` - 按日横截面分桶 |
-| `metrics.py` | 基础指标函数：`calculate_metrics()`、`calculate_ic_by_date()` |
 | `tearsheet.py` | HTML Tearsheet 报告生成：`generate_html_tearsheet()` |
 | `visualization.py` | 可视化函数：IC 时序、分桶收益、Spread 累计、换手率、月度热力图 |
-| `reporting.py` | 报告生成：`generate_report()` |
-| `cluster/cluster_evaluate.py` | `ClusterEvaluator` - K-means 聚类评估 + 聚类收益分析 |
+
+> ⚠️ 以下模块未被主流程使用，保留供扩展：
+> - `bucketing.py` - 分桶函数
+> - `metrics.py` - 基础指标函数
+> - `cross_section_adapter.py` - 横截面数据适配器
+> - `reporting.py` - 报告生成
+> - `cluster/cluster_evaluate.py` - 聚类评估（用于独立的 `run_cluster_analysis.py`）
 
 ### backtest/ - 回测层
 
 | 模块 | 类/功能 |
 |------|---------|
 | `simple_backtest.py` | `SimplePortfolioBacktester` - Top-K 策略回测（v2.0）：等权/分数加权 + 调仓频率 + 基准对比 + 交易成本 |
-| `top_bucket_backtest.py` | `StrategyBacktest` - 分桶策略回测：选择预测最高桶构建组合 |
-| `cluster_strategy_backtest.py` | `StrategyBacktest` - 聚类信号策略：基于聚类标签构建组合 |
+
+> ⚠️ `top_bucket_backtest.py`、`cluster_strategy_backtest.py` 未被主流程使用，保留供扩展
 
 ### pipelines/ - 执行管道
 
 | 模块 | 功能 |
 |------|------|
-| `run_baseline_pipeline.py` | 主训练管道：三条线对比（回归/Reg-on-Rank/LambdaRank）+ 横截面评估 + 回测 |
+| `run_baseline_pipeline.py` | **主训练管道**：三条线对比（回归/Reg-on-Rank/LambdaRank）+ 横截面评估 + 回测 |
 | `prepare_factors.py` | 因子准备：生成 → 质量检查 → IC 评估 → 入库 |
-| `prepare_data.py` | 数据准备（无快照） |
 | `prepare_data_with_snapshot.py` | 数据准备 + 快照创建 |
-| `run_cluster_analysis.py` | 聚类分析运行脚本 |
-| `run_pca_state.py` | PCA 降维分析运行脚本 |
+
+> ⚠️ 以下管道未集成到主流程（`main.py`）：
+> - `prepare_data.py` - 数据准备（无快照版本）
+> - `run_cluster_analysis.py` - 独立的聚类分析
+> - `run_pca_state.py` - 独立的 PCA 降维
+> - `train_models（old）.py` - 废弃的旧版训练脚本
 
 ### 根目录
 
 | 模块 | 功能 |
 |------|------|
-| `main.py` | `MLPipeline` - 统一入口：串联 prepare_data → prepare_factors → train |
+| `main.py` | `MLPipeline` - 统一入口：串联 prepare_data_with_snapshot → prepare_factors → run_baseline_pipeline |
 
 ---
 
 ## 🔧 核心机制详解
 
-### 1. 数据快照系统
+### 1. 7 层可交易性过滤（TradabilityFilter）
+
+按顺序执行，确保选股池中只有真正可交易的股票：
+
+| 层级 | 过滤项 | 默认阈值 | 说明 |
+|------|--------|----------|------|
+| 1 | ST/退市 | 排除 | 避免异常股票 |
+| 2 | 停牌 | 排除 | 当日无法交易 |
+| 3 | 涨跌停 | ±9.5% | 无法按预期价格成交 |
+| 4 | 上市龄 | ≥60天 | 避免新股异常波动 |
+| 5 | 成交量 | ≥2000手 | 流动性保障 |
+| 6 | 价格 | ≥1元 | 避免仙股 |
+| 7 | 换手率 | ≥0.1% | 活跃度保障 |
+
+### 2. Point-in-Time (PIT) 数据对齐
+
+**核心原则**：绝不使用未来信息
+
+```
+财务数据生效时间 = 公告日 + 滞后天数（默认90天）
+```
+
+- **财务数据**：按公告日（非报告期）+ 90天滞后生效
+- **前向填充**：最多95天（季报间隔90天 + 5天缓冲）
+- **前复权**：使用复权因子调整历史价格
+
+### 3. 数据快照系统（DataSnapshot）
 
 **版本命名规则**：`ds_YYYYQQ_vN`（如 `ds_2025Q4_v1`）
 
@@ -166,12 +199,9 @@
 | 可交易样本 | < 70% | 有效样本太少 |
 | 极值比例 | > 5% | 异常值过多 |
 
-**快照包含**：
-- 特征矩阵（Parquet）
-- 标签数据（Parquet）
-- 元数据 JSON（配置、统计、哈希校验）
+**快照包含**：特征矩阵（Parquet）+ 标签数据（Parquet）+ 元数据 JSON
 
-### 2. 时序交叉验证（Purge + Embargo）
+### 4. 时序交叉验证（Purge + Embargo）
 
 ```
 时间轴：
@@ -182,8 +212,6 @@
    (train_end - purge_days)      (valid_end + embargo_days)
 ```
 
-**参数设置建议**：
-
 | 参数 | 建议值 | 说明 |
 |------|--------|------|
 | purge_days | ≥ max_horizon | 避免目标标签重叠 |
@@ -191,20 +219,32 @@
 | train_ratio | 60% | 训练集占比 |
 | valid_ratio | 20% | 验证集占比 |
 
-### 3. 因子中性化（回归残差法）
+### 5. 三条线标签构造（RankingLabelFactory）
 
-对每个截面日期执行：
+| 任务类型 | 标签构造 | 模型 | 优化目标 |
+|----------|----------|------|----------|
+| `regression` | 原始收益率 | LightGBMModel | MSE |
+| `regression_rank` | 横截面 GaussRank | LightGBMModel | MSE(排序值) |
+| `lambdarank` | 分箱等级(0~4) + group | LightGBMRanker | NDCG |
+
+**GaussRank 变换**：将均匀排序映射为正态分布
+```
+rank_pct = (rank - 1) / (N - 1)  →  GaussRank = Φ⁻¹(rank_pct)
+```
+
+### 6. 因子预处理流水线
+
+**顺序严格**（不可颠倒）：
+
+1. **Winsorize**：1%-99% 分位数截断（去极值）
+2. **Standardize**：Z-score = (x - μ) / σ（标准化）
+3. **Neutralize**：market_cap + industry 回归残差（中性化）
 
 ```
 factor_neutralized = factor - β₁ × log(market_cap) - β₂ × industry_dummies
 ```
 
-**处理流水线顺序**：
-1. **Winsorize**：1%-99% 分位数截断
-2. **Standardize**：Z-score = (x - μ) / σ
-3. **Neutralize**：市值 + 行业回归残差
-
-### 4. PSI 漂移检测
+### 7. PSI 漂移检测（DriftDetector）
 
 **Population Stability Index**：
 
@@ -218,17 +258,17 @@ PSI = Σ (actual_pct - expected_pct) × ln(actual_pct / expected_pct)
 | 0.1 ~ 0.2 | 轻微漂移 ⚠️ |
 | ≥ 0.2 | 显著漂移 ❌ |
 
-### 5. 横截面评估指标
+### 8. 横截面评估指标（CrossSectionAnalyzer）
 
 | 指标 | 公式 | 说明 |
 |------|------|------|
-| Rank IC | Spearman(预测分数, 实际收益) | 每日横截面相关 |
+| Rank IC | Spearman(预测, 收益) | 每日横截面相关 |
 | ICIR | mean(IC) / std(IC) | IC 稳定性 |
 | ICIR 年化 | ICIR × √252 | 年化信息比率 |
-| Top-Mean Spread | mean(Top桶收益) - mean(全体收益) | 头部超额收益 |
-| 单调性 | 分桶收益是否单调递增 | 因子有效性验证 |
+| Top-Mean Spread | mean(Top桶) - mean(全体) | 头部超额收益 |
+| 单调性 | τ(bucket, return) | 分桶收益递增性 |
 
-### 6. 回测执行模式（v2.0）
+### 9. 回测执行模式（SimplePortfolioBacktester v2.0）
 
 **Open-to-Open（固定模式）**：
 
@@ -236,17 +276,18 @@ PSI = Σ (actual_pct - expected_pct) × ln(actual_pct / expected_pct)
 T 日收盘 → 计算信号 → T+1 日开盘买入 → T+H 日开盘卖出
 ```
 
-- ✅ 符合 A 股 T+1 制度
-- ✅ 信号与执行有充足时间差
-- ✅ 避免收盘竞价博弈
+| 参数 | 选项 | 说明 |
+|------|------|------|
+| `top_k` | 10/20/30 | 选股数量 |
+| `rebalance_freq` | 1D/1W/1M | 调仓频率 |
+| `weighting` | equal/score_weighted | 权重方式 |
+| `commission` | 0.0003 | 佣金（万3） |
+| `stamp_duty` | 0.001 | 印花税（千1） |
+| `slippage` | 0.001 | 滑点估计 |
 
-**回测器功能**（`SimplePortfolioBacktester`）：
-- **选股规则**：Top-K 预测分数最高的股票
-- **权重方式**：等权（1/K）或分数加权（softmax）
-- **调仓频率**：日度（1D）/ 周度（1W）/ 月度（1M）
-- **交易成本**：佣金 + 印花税 + 滑点
-- **基准对比**：支持等权基准或指数基准，计算 Alpha/Beta/IR
-- **输出图表**：净值曲线、回撤、月度热力图、换手率
+**基准对比**：支持等权基准，计算 Alpha/Beta/Information Ratio
+
+**输出图表**：净值曲线、回撤、月度热力图、换手率与成本
 
 ---
 
@@ -322,39 +363,126 @@ python pipelines/run_pca_state.py
 
 ## 📊 输出产物
 
-### 目录结构
+### 完整目录结构（基于实际代码）
 
 ```
 ML output/
-├── datasets/           # 数据快照
+├── snapshots/                   # 数据快照（版本化管理）⭐主流程
 │   └── ds_2025Q4_v1/
-│       ├── features.parquet
-│       ├── labels.parquet
-│       └── metadata.json
-├── models/             # 模型文件
+│       ├── 000001_data.parquet           # 股票数据（特征+标签）
+│       └── metadata.json                 # 元数据（哈希、统计、过滤配置）
+│
+├── datasets/                    # 因子数据集 ⭐主流程
 │   └── baseline_v1/
-│       ├── regression_model.pkl
-│       ├── regression_rank_model.pkl
-│       └── lambdarank_model.pkl
-├── predictions/        # 预测结果
+│       ├── qualified_factors_YYYYMMDD.parquet  # 合格因子列表
+│       └── qualified_factors_YYYYMMDD.csv      # CSV副本
+│
+├── models/                      # 训练好的模型 ⭐主流程
 │   └── baseline_v1/
-│       └── test_predictions.parquet
-├── reports/            # 评估报告
+│       ├── regression_model.pkl           # 回归模型
+│       ├── regression_rank_model.pkl      # Reg-on-Rank 模型
+│       └── lambdarank_model.pkl           # LambdaRank 模型
+│
+├── predictions/                 # 预测结果 ⭐主流程
 │   └── baseline_v1/
-│       ├── model_comparison.json
-│       ├── drift_report.json
-│       ├── factor_ic_report.json
-│       ├── regression_backtest/
-│       │   ├── portfolio_weights.parquet
-│       │   ├── daily_returns.parquet
-│       │   └── backtest_stats.json
-│       └── ...
-└── figures/            # 可视化图表
+│       ├── regression_predictions.parquet
+│       ├── regression_rank_predictions.parquet
+│       └── lambdarank_predictions.parquet
+│
+├── scalers/                     # 标准化器（可选）
+│   └── baseline_v1/
+│       └── scaler_000001.pkl              # 按股票保存
+│
+├── states/                      # PCA 降维状态（可选，仅 run_pca_state.py）
+│   └── baseline_v1/
+│       ├── train/
+│       ├── valid/
+│       └── test/
+│
+├── reports/                     # 评估报告
+│   └── baseline_v1/
+│       ├── training/            # 训练报告 ⭐主流程
+│       │   ├── model_comparison.json          # 三条线对比
+│       │   ├── feature_drift_report.json      # 特征漂移
+│       │   └── prediction_drift_report.json   # 预测漂移
+│       │
+│       ├── evaluation/          # 评估报告 ⭐主流程
+│       │   ├── regression_results.json        # 横截面分析结果
+│       │   ├── regression_rank_results.json
+│       │   └── lambdarank_results.json
+│       │
+│       ├── factors/             # 因子评估报告（prepare_factors.py）
+│       │   ├── factor_screening_detail_YYYYMMDD.csv    # 因子筛选详情
+│       │   ├── ic_series/                              # IC时序CSV
+│       │   │   ├── ic_ROC_20_5d.csv
+│       │   │   └── ...
+│       │   ├── quantile_returns/                       # 分位数收益CSV
+│       │   │   ├── quantile_returns_ROC_20_5d.csv
+│       │   │   └── ...
+│       │   ├── tearsheet_ROC_20_5d.html               # 因子 HTML 报告
+│       │   └── tradability_filter_log.csv             # 可交易性过滤日志
+│       │
+│       ├── data_quality/        # 数据质量报告（prepare_data_with_snapshot.py）
+│       │   └── ds_2025Q4_v1.json
+│       │
+│       ├── regression_backtest/     # 回测详细数据 ⭐主流程
+│       │   ├── portfolio_weights.parquet      # 每日持仓权重
+│       │   ├── daily_returns.parquet          # 毛收益/净收益/成本/换手
+│       │   └── backtest_stats.json            # 完整统计指标
+│       │
+│       ├── regression_rank_backtest/
+│       │   └── （同上3个文件）
+│       │
+│       ├── lambdarank_backtest/
+│       │   └── （同上3个文件）
+│       │
+│       ├── clustering/          # 聚类分析报告（可选，run_cluster_analysis.py）
+│       └── pca/                 # PCA 分析报告（可选，run_pca_state.py）
+│
+├── figures/                     # 可视化图表
+│   └── baseline_v1/
+│       ├── regression_backtest.png        # 回测 4 子图 ⭐主流程
+│       ├── regression_rank_backtest.png
+│       ├── lambdarank_backtest.png
+│       │
+│       └── factors/             # 因子图表（prepare_factors.py）
+│           ├── ic_series_ROC_20_5d.png       # IC 走廊图
+│           ├── ic_dist_ROC_20_5d.png         # IC 分布直方图
+│           ├── ic_heatmap_ROC_20_5d.png      # IC 月度热力图
+│           ├── quantile_cumret_ROC_20_5d.png # 分位数累计收益
+│           ├── quantile_meanret_ROC_20_5d.png# 分位数平均收益
+│           └── spread_cumret_ROC_20_5d.png   # Spread 累计收益
+│
+└── artifacts/                   # 其他工件
     └── baseline_v1/
-        ├── regression_backtest.png
-        ├── ic_timeseries.png
-        ├── bucket_returns.png
-        └── drawdown.png
+```
+
+**说明**：
+- ⭐标记：主流程（main.py）必定输出
+- 无标记：可选流程输出（如 run_pca_state.py、run_cluster_analysis.py）
+- 三条线：每种任务类型（regression/regression_rank/lambdarank）各生成一套文件
+
+### 关键文件详解
+
+| 文件 | 格式 | 内容 | 来源管道 |
+|------|------|------|----------|
+| `{symbol}_data.parquet` | Parquet | 特征矩阵 + 标签（MultiIndex: date × ticker） | prepare_data_with_snapshot |
+| `metadata.json` | JSON | 快照元数据：哈希、样本数、特征数、过滤配置、质量检查 | prepare_data_with_snapshot |
+| `qualified_factors_*.parquet` | Parquet | 通过 IC/ICIR 筛选的合格因子列表 | prepare_factors |
+| `factor_screening_detail_*.csv` | CSV | 所有因子的 IC/ICIR/p-value/入库判断 | prepare_factors |
+| `tearsheet_*.html` | HTML | 因子完整评估报告（可浏览器打开） | prepare_factors |
+| `ic_*.csv` | CSV | IC 时序数据 | prepare_factors |
+| `quantile_returns_*.csv` | CSV | 分位数收益时序 | prepare_factors |
+| `{task_type}_model.pkl` | PKL | 训练好的模型对象 | run_baseline_pipeline |
+| `{task_type}_predictions.parquet` | Parquet | 预测分数 + 真实标签 + bucket 标记 | run_baseline_pipeline |
+| `{task_type}_results.json` | JSON | 横截面分析：IC/ICIR/Spread/单调性 | run_baseline_pipeline |
+| `model_comparison.json` | JSON | 三条线对比：IC、ICIR、Spread、胜率 | run_baseline_pipeline |
+| `feature_drift_report.json` | JSON | 每个特征的 PSI 值和漂移判断 | run_baseline_pipeline |
+| `prediction_drift_report.json` | JSON | Valid vs Test 的 IC/Spread 对比 | run_baseline_pipeline |
+| `portfolio_weights.parquet` | Parquet | 每日每只股票的持仓权重（MultiIndex: date × ticker） | run_baseline_pipeline |
+| `daily_returns.parquet` | Parquet | 毛收益、净收益、交易成本、换手率时序 | run_baseline_pipeline |
+| `backtest_stats.json` | JSON | 年化收益、夏普、回撤、Alpha/Beta/IR 等完整指标 | run_baseline_pipeline |
+| `{task_type}_backtest.png` | PNG | 回测 4 子图：净值曲线/回撤/月度热力图/换手率与成本 | run_baseline_pipeline |
 ```
 
 ### 评估报告示例
